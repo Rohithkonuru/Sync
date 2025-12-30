@@ -1,0 +1,681 @@
+from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Query
+from typing import List, Optional
+from datetime import datetime
+from bson import ObjectId
+import os
+import uuid
+from PIL import Image
+import io
+from app.models.user import UserResponse, UserUpdate
+from app.middleware.auth_middleware import get_current_user
+from app.database import get_database
+from app.services.auth import get_user_by_id, user_to_dict
+from app.services.notifications import create_notification
+
+router = APIRouter()
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(current_user: dict = Depends(get_current_user)):
+    """Get current user profile"""
+    return user_to_dict(current_user)
+
+@router.get("/me/ats-score")
+async def get_my_ats_score(current_user: dict = Depends(get_current_user)):
+    """Get current user's ATS score"""
+    return current_user.get("ats_score")
+
+@router.get("/me/applications")
+async def get_my_applications_alias(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """Alias endpoint for /api/jobs/my-applications/list - returns applications for logged-in user"""
+    from app.routes.jobs import get_my_applications
+    return await get_my_applications(skip, limit, current_user)
+
+@router.put("/me", response_model=UserResponse)
+async def update_current_user_profile(
+    user_update: UserUpdate,
+    current_user: dict = Depends(get_current_user)
+):
+    """Update current user profile"""
+    db = get_database()
+    update_data = user_update.dict(exclude_unset=True)
+    update_data["updated_at"] = datetime.utcnow()
+    
+    await db.users.update_one(
+        {"_id": ObjectId(current_user["_id"])},
+        {"$set": update_data}
+    )
+    
+    updated_user = await get_user_by_id(str(current_user["_id"]))
+    return user_to_dict(updated_user)
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user_profile(user_id: str):
+    """Get user profile by ID"""
+    user = await get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    return user_to_dict(user)
+
+@router.post("/{user_id}/connect")
+async def send_connection_request(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Send connection request"""
+    if user_id == str(current_user["_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot connect to yourself"
+        )
+    
+    db = get_database()
+    target_user = await get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if already connected
+    if user_id in current_user.get("connections", []):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Already connected"
+        )
+    
+    # Check if request already sent
+    if str(current_user["_id"]) in target_user.get("connection_requests", []):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connection request already sent"
+        )
+    
+    # Add to connection requests
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$addToSet": {"connection_requests": str(current_user["_id"])}}
+    )
+    
+    # Create notification
+    await create_notification(
+        user_id=user_id,
+        type="connection_request",
+        title="New Connection Request",
+        message=f"{current_user.get('first_name')} {current_user.get('last_name')} wants to connect",
+        related_user_id=str(current_user["_id"])
+    )
+    
+    return {"message": "Connection request sent"}
+
+@router.post("/{user_id}/accept")
+async def accept_connection_request(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Accept connection request"""
+    db = get_database()
+    
+    # Remove from connection requests and add to connections
+    await db.users.update_one(
+        {"_id": ObjectId(current_user["_id"])},
+        {
+            "$pull": {"connection_requests": user_id},
+            "$addToSet": {"connections": user_id}
+        }
+    )
+    
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$addToSet": {"connections": str(current_user["_id"])}}
+    )
+    
+    # Create notification
+    await create_notification(
+        user_id=user_id,
+        type="connection_accepted",
+        title="Connection Accepted",
+        message=f"{current_user.get('first_name')} {current_user.get('last_name')} accepted your connection request",
+        related_user_id=str(current_user["_id"])
+    )
+    
+    return {"message": "Connection accepted"}
+
+@router.get("/connections/list", response_model=List[UserResponse])
+async def get_connections(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get user's connections with pagination"""
+    db = get_database()
+    connection_ids = current_user.get("connections", [])
+    
+    if not connection_ids:
+        return []
+    
+    # Convert to ObjectIds and filter valid ones
+    valid_ids = [ObjectId(cid) for cid in connection_ids if ObjectId.is_valid(cid)]
+    
+    if not valid_ids:
+        return []
+    
+    # Fetch users with pagination
+    users_cursor = db.users.find({"_id": {"$in": valid_ids}}).skip(skip).limit(limit)
+    users = await users_cursor.to_list(length=limit)
+    
+    return [user_to_dict(user) for user in users]
+
+@router.delete("/connections/{user_id}")
+async def remove_connection(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove/unfriend a connection"""
+    db = get_database()
+    
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid user ID format"
+        )
+    
+    if user_id == str(current_user["_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove yourself as a connection"
+        )
+    
+    # Check if connection exists
+    if user_id not in current_user.get("connections", []):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Connection not found"
+        )
+    
+    # Remove from both users' connections
+    await db.users.update_one(
+        {"_id": ObjectId(current_user["_id"])},
+        {"$pull": {"connections": user_id}}
+    )
+    
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$pull": {"connections": str(current_user["_id"])}}
+    )
+    
+    return {"message": "Connection removed successfully"}
+
+@router.get("/suggestions/list", response_model=List[UserResponse])
+async def get_suggestions(current_user: dict = Depends(get_current_user)):
+    """Get suggested connections"""
+    db = get_database()
+    current_connections = current_user.get("connections", [])
+    current_connections.append(str(current_user["_id"]))
+    pending_requests = current_user.get("connection_requests", [])
+    
+    # Get users not in connections or pending requests
+    exclude_ids = current_connections + pending_requests
+    suggestions = await db.users.find({
+        "_id": {"$nin": [ObjectId(cid) for cid in exclude_ids if ObjectId.is_valid(cid)]},
+        "user_type": {"$ne": "recruiter"}
+    }).limit(10).to_list(length=10)
+    
+    return [user_to_dict(user) for user in suggestions]
+
+@router.get("/connection-requests/list", response_model=List[UserResponse])
+async def get_connection_requests(current_user: dict = Depends(get_current_user)):
+    """Get pending connection requests"""
+    db = get_database()
+    request_ids = current_user.get("connection_requests", [])
+    
+    users = []
+    for req_id in request_ids:
+        if ObjectId.is_valid(req_id):
+            user = await db.users.find_one({"_id": ObjectId(req_id)})
+            if user:
+                users.append(user_to_dict(user))
+    
+    return users
+
+@router.post("/{user_id}/reject")
+async def reject_connection_request(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Reject connection request"""
+    db = get_database()
+    
+    # Remove from connection requests
+    await db.users.update_one(
+        {"_id": ObjectId(current_user["_id"])},
+        {"$pull": {"connection_requests": user_id}}
+    )
+    
+    return {"message": "Connection request rejected"}
+
+@router.post("/{user_id}/decline")
+async def decline_connection_request(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Decline connection request (alias for reject)"""
+    return await reject_connection_request(user_id, current_user)
+
+@router.delete("/{user_id}/cancel-request")
+async def cancel_connection_request(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Cancel a connection request you sent"""
+    db = get_database()
+    target_user = await get_user_by_id(user_id)
+    if not target_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Check if request was sent
+    if str(current_user["_id"]) not in target_user.get("connection_requests", []):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending connection request found"
+        )
+    
+    # Remove from target user's connection requests
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$pull": {"connection_requests": str(current_user["_id"])}}
+    )
+    
+    return {"message": "Connection request cancelled"}
+
+@router.get("/search", response_model=List[UserResponse])
+async def search_users(
+    query: Optional[str] = Query(None),
+    user_type: Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    skills: Optional[str] = Query(None),
+    experience_years_min: Optional[int] = Query(None, ge=0),
+    experience_years_max: Optional[int] = Query(None, ge=0),
+    role: Optional[str] = Query(None),  # For filtering by role/headline
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """Search candidates/users by various criteria with advanced filters"""
+    db = get_database()
+    search_query = {}
+    
+    # Exclude current user
+    search_query["_id"] = {"$ne": ObjectId(current_user["_id"])}
+    
+    # Filter by user type (for candidate search, typically job_seeker or professional)
+    if user_type:
+        valid_types = ["student", "job_seeker", "professional", "recruiter"]
+        if user_type not in valid_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid user_type. Must be one of: {', '.join(valid_types)}"
+            )
+        search_query["user_type"] = user_type
+    
+    # Location filter (case-insensitive partial match)
+    if location:
+        search_query["location"] = {"$regex": location, "$options": "i"}
+    
+    # Skills filter (match any of the provided skills)
+    if skills:
+        skill_list = [s.strip().lower() for s in skills.split(",") if s.strip()]
+        if skill_list:
+            search_query["skills"] = {
+                "$in": [{"$regex": skill, "$options": "i"} for skill in skill_list]
+            }
+            # Better approach: check if any skill in array matches
+            search_query["skills"] = {
+                "$elemMatch": {
+                    "$regex": "|".join(skill_list),
+                    "$options": "i"
+                }
+            }
+            # Actually, simpler approach:
+            search_query["$or"] = search_query.get("$or", [])
+            for skill in skill_list:
+                search_query["$or"].append({"skills": {"$regex": skill, "$options": "i"}})
+    
+    # Experience years filter
+    if experience_years_min is not None or experience_years_max is not None:
+        exp_query = {}
+        if experience_years_min is not None:
+            exp_query["$gte"] = experience_years_min
+        if experience_years_max is not None:
+            exp_query["$lte"] = experience_years_max
+        if exp_query:
+            search_query["experience_years"] = exp_query
+    
+    # Role/headline filter
+    if role:
+        if "$or" not in search_query:
+            search_query["$or"] = []
+        search_query["$or"].append({"headline": {"$regex": role, "$options": "i"}})
+    
+    # Text search (name, headline, bio)
+    if query:
+        text_search = {
+            "$or": [
+                {"first_name": {"$regex": query, "$options": "i"}},
+                {"last_name": {"$regex": query, "$options": "i"}},
+                {"headline": {"$regex": query, "$options": "i"}},
+                {"bio": {"$regex": query, "$options": "i"}}
+            ]
+        }
+        if "$or" in search_query:
+            # Combine with existing $or conditions
+            search_query["$and"] = [
+                {"$or": search_query.pop("$or")},
+                text_search
+            ]
+        else:
+            search_query.update(text_search)
+    
+    # Execute search with pagination
+    users_cursor = db.users.find(search_query).skip(skip).limit(limit)
+    users = await users_cursor.to_list(length=limit)
+    
+    return [user_to_dict(user) for user in users]
+
+def optimize_image(image_bytes: bytes, max_width: int = 500, max_height: int = 500, quality: int = 85) -> bytes:
+    """Optimize image by resizing and compressing"""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert RGBA/LA/P to RGB if necessary
+        if img.mode in ('RGBA', 'LA'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'RGBA':
+                background.paste(img, mask=img.split()[-1])
+            else:
+                background.paste(img)
+            img = background
+        elif img.mode == 'P':
+            img = img.convert('RGB')
+        elif img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        
+        # Resize if needed (maintain aspect ratio)
+        if img.width > max_width or img.height > max_height:
+            img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+        
+        # Save optimized image
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        output.seek(0)
+        optimized_bytes = output.read()
+        
+        # Only return optimized if it's smaller, otherwise return original
+        if len(optimized_bytes) < len(image_bytes):
+            return optimized_bytes
+        return image_bytes
+    except Exception as e:
+        # If optimization fails, return original
+        return image_bytes
+
+@router.post("/upload/profile-picture")
+async def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload and optimize profile picture"""
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."
+        )
+
+    # Validate file size (max 5MB)
+    max_size = 5 * 1024 * 1024  # 5MB
+    file_content = await file.read()
+    if len(file_content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 5MB."
+        )
+
+    try:
+        # Optimize image
+        optimized_content = optimize_image(file_content, max_width=500, max_height=500, quality=85)
+        
+        # Generate unique filename
+        unique_filename = f"profile_{uuid.uuid4()}.jpg"
+        upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, unique_filename)
+
+        # Save optimized file
+        with open(file_path, "wb") as buffer:
+            buffer.write(optimized_content)
+
+        # Update user's profile picture URL
+        file_url = f"/uploads/{unique_filename}"
+        db = get_database()
+        await db.users.update_one(
+            {"_id": ObjectId(current_user["_id"])},
+            {"$set": {"profile_picture": file_url, "updated_at": datetime.utcnow()}}
+        )
+        
+        return {"url": file_url}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process image: {str(e)}"
+        )
+
+from app.services.ats_scorer import calculate_ats_score
+
+@router.post("/upload/resume")
+async def upload_resume(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload resume file for ATS scoring"""
+    # Validate file type
+    allowed_types = [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only PDF, DOC, and DOCX files are allowed."
+        )
+
+    # Validate file size (max 10MB for resume)
+    max_size = 10 * 1024 * 1024  # 10MB
+    file_content = await file.read()
+    if len(file_content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 10MB."
+        )
+
+    try:
+        # Generate unique filename
+        unique_filename = f"resume_{uuid.uuid4()}_{file.filename}"
+        upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, unique_filename)
+
+        # Save file
+        with open(file_path, "wb") as buffer:
+            buffer.write(file_content)
+
+        # Update user's resume URL
+        file_url = f"/uploads/{unique_filename}"
+        db = get_database()
+        
+        # Update user with resume_url
+        await db.users.update_one(
+            {"_id": ObjectId(current_user["_id"])},
+            {"$set": {"resume_url": file_url, "updated_at": datetime.utcnow()}}
+        )
+        
+        # Calculate ATS score immediately
+        try:
+            # Update current_user dict with new resume_url for calculation
+            current_user["resume_url"] = file_url
+            ats_result = await calculate_ats_score(current_user)
+            
+            # Save ATS score to user profile
+            await db.users.update_one(
+                {"_id": ObjectId(current_user["_id"])},
+                {"$set": {"ats_score": ats_result}}
+            )
+        except Exception as e:
+            print(f"Error calculating ATS score during upload: {e}")
+            # Fallback ATS result so upload doesn't fail
+            ats_result = {
+                "score": 0,
+                "verified": True, # We just uploaded it
+                "breakdown": {"keywords": 0, "skills": 0, "experience": 0, "education": 0, "completeness": 0},
+                "last_updated": datetime.utcnow().isoformat()
+            }
+
+        return {
+            "url": file_url, 
+            "message": "Resume uploaded successfully and ATS score calculated",
+            "ats_score": ats_result
+        }
+    except Exception as e:
+        print(f"Upload failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload resume: {str(e)}"
+        )
+
+
+
+@router.delete("/me/profile-picture")
+async def delete_profile_picture(
+    current_user: dict = Depends(get_current_user)
+):
+    """Delete profile picture"""
+    db = get_database()
+    user_id = str(current_user["_id"])
+    
+    # Get current profile picture URL
+    profile_picture = current_user.get("profile_picture")
+    
+    if profile_picture:
+        # Delete file from storage if it exists
+        try:
+            upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+            # Extract filename from URL
+            filename = profile_picture.split("/")[-1]
+            file_path = os.path.join(upload_dir, filename)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            # Log error but continue with database update
+            print(f"Error deleting file: {e}")
+    
+    # Remove profile picture from user record
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$unset": {"profile_picture": ""}, "$set": {"updated_at": datetime.utcnow()}}
+    )
+    
+    return {"message": "Profile picture deleted successfully"}
+
+@router.post("/upload/banner-picture")
+async def upload_banner_picture(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload and optimize banner picture"""
+    # Validate file type
+    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."
+        )
+
+    # Validate file size (max 10MB for banner)
+    max_size = 10 * 1024 * 1024  # 10MB
+    file_content = await file.read()
+    if len(file_content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size is 10MB."
+        )
+
+    try:
+        # Optimize banner image (larger dimensions)
+        optimized_content = optimize_image(file_content, max_width=1920, max_height=600, quality=85)
+        
+        # Generate unique filename
+        unique_filename = f"banner_{uuid.uuid4()}.jpg"
+        upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, unique_filename)
+
+        # Save optimized file
+        with open(file_path, "wb") as buffer:
+            buffer.write(optimized_content)
+
+        # Update user's banner picture URL
+        file_url = f"/uploads/{unique_filename}"
+        db = get_database()
+        await db.users.update_one(
+            {"_id": ObjectId(current_user["_id"])},
+            {"$set": {"banner_picture": file_url, "updated_at": datetime.utcnow()}}
+        )
+        
+        return {"url": file_url}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process image: {str(e)}"
+        )
+
+@router.get("/me/ats-score")
+async def get_ats_score(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get ATS score for current user's resume"""
+    from app.services.ats_scorer import calculate_ats_score
+    
+    user_type = current_user.get("user_type")
+    if user_type not in ["student", "professional", "job_seeker"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ATS score is only available for students, professionals, and job seekers"
+        )
+    
+    resume_url = current_user.get("resume_url")
+    if not resume_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Resume not found. Please upload a resume first."
+        )
+    
+    try:
+        # Calculate ATS score
+        score_data = await calculate_ats_score(current_user)
+        return score_data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate ATS score: {str(e)}"
+        )
+
