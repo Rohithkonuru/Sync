@@ -29,22 +29,22 @@ const Button = ({
   const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
   
   const sizeClasses = {
-    sm: 'px-3 py-1.5 text-sm',
-    md: 'px-4 py-2 text-base',
-    lg: 'px-6 py-3 text-lg',
+    sm: 'px-3 py-1.5 text-xs sm:text-sm',
+    md: 'px-4 py-2 text-sm sm:text-base',
+    lg: 'px-6 py-3 text-base lg:text-lg',
   };
 
   const variantClasses = {
     primary: {
-      orange: 'bg-orange-500 text-white hover:bg-orange-600 focus:ring-orange-500',
-      purple: 'bg-purple-500 text-white hover:bg-purple-600 focus:ring-purple-500',
-      green: 'bg-green-500 text-white hover:bg-green-600 focus:ring-green-500',
-      blue: 'bg-blue-500 text-white hover:bg-blue-600 focus:ring-blue-500',
-      default: 'bg-primary-500 text-white hover:bg-primary-600 focus:ring-primary-500',
+      orange: 'bg-orange-600 text-white hover:bg-orange-700 focus:ring-orange-500 disabled:bg-orange-300',
+      purple: 'bg-purple-600 text-white hover:bg-purple-700 focus:ring-purple-500 disabled:bg-purple-300',
+      green: 'bg-green-600 text-white hover:bg-green-700 focus:ring-green-500 disabled:bg-green-300',
+      blue: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 disabled:bg-blue-300',
+      default: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 disabled:bg-blue-300',
     },
-    secondary: 'bg-white text-gray-700 border-2 border-gray-300 hover:bg-gray-50 focus:ring-gray-500',
-    ghost: 'bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500',
-    danger: 'bg-red-500 text-white hover:bg-red-600 focus:ring-red-500',
+    secondary: 'bg-gray-100 text-gray-900 border-2 border-gray-300 hover:bg-gray-200 focus:ring-gray-500 disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200',
+    ghost: 'bg-transparent text-gray-700 hover:bg-gray-100 focus:ring-gray-500 disabled:text-gray-400',
+    danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 disabled:bg-red-300',
   };
 
   const getVariantClass = () => {

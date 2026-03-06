@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { jobService, postService } from '../../services/api';
 import { Button, Card, Badge, ProgressBar, Input } from '../ui';
+import FeedCard from '../FeedCard';
 import { 
   FiBriefcase, 
   FiSearch, 
@@ -14,7 +15,10 @@ import {
   FiUser,
   FiRefreshCw,
   FiUpload,
-  FiCheck
+  FiCheck,
+  FiVideo,
+  FiCalendar,
+  FiEdit2
 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
@@ -39,11 +43,26 @@ const JobSeekerDashboardEnhanced = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [locationQuery, setLocationQuery] = useState('');
   
+  // ATS Score State
+  const [atsScore, setAtsScore] = useState(null);
+  const [loadingAtsScore, setLoadingAtsScore] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const resumeInputRef = React.useRef(null);
+  
   // Mock Data
   const [profileStrength, setProfileStrength] = useState(85);
   const [interviewSchedule, setInterviewSchedule] = useState([
     { id: 1, company: 'Innovate Tech', role: 'Frontend Dev', date: 'Tomorrow, 10:00 AM', type: 'Video' }
   ]);
+
+  const resolveImageUrl = (url) => {
+    if (!url) return url;
+    if (url.startsWith('/uploads/')) {
+      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      return `${base}${url}`;
+    }
+    return url;
+  };
 
   useEffect(() => {
     loadData();
@@ -145,45 +164,243 @@ const JobSeekerDashboardEnhanced = () => {
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
+
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    show: { opacity: 1, y: 0 }
+  };
 
   return (
     <div className="min-h-screen bg-neutral-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* Profile Strength & Resume Action Banner */}
+        {/* ATS Score & Resume Action Banner */}
         <motion.div 
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-xl p-6 shadow-sm border border-neutral-200 mb-8 flex flex-col md:flex-row items-center justify-between gap-6"
+          className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-6 shadow-lg text-white mb-8 flex flex-col md:flex-row items-center justify-between gap-6"
         >
           <div className="flex-1 w-full">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-lg font-bold text-gray-900">Profile Strength</h2>
-              <span className="text-orange-600 font-bold">{profileStrength}%</span>
+              <div className="flex items-center gap-2">
+                <FiTrendingUp className="text-blue-200 w-5 h-5" />
+                <h2 className="text-lg font-bold text-white">ATS Friendly Score</h2>
+              </div>
+              <span className={`font-bold text-2xl ${
+                (atsScore?.score || 0) >= 80 ? 'text-green-300' : 
+                (atsScore?.score || 0) >= 60 ? 'text-yellow-300' : 'text-red-300'
+              }`}>
+                {loadingAtsScore ? '...' : atsScore ? `${atsScore.score}%` : '0%'}
+              </span>
             </div>
-            <ProgressBar value={profileStrength} color="orange" showLabel={false} className="h-3" />
-            <p className="text-sm text-gray-500 mt-2">Add 2 more projects to reach All-Star status.</p>
+            {loadingAtsScore ? (
+               <div className="h-3 w-full bg-blue-500/30 rounded-full animate-pulse"></div>
+            ) : (
+              <div className="w-full bg-blue-900/30 rounded-full h-3">
+                <div 
+                  className={`h-3 rounded-full transition-all duration-1000 ${
+                    (atsScore?.score || 0) >= 80 ? 'bg-green-400' : 
+                    (atsScore?.score || 0) >= 60 ? 'bg-yellow-400' : 'bg-red-400'
+                  }`}
+                  style={{ width: `${atsScore?.score || 0}%` }}
+                ></div>
+              </div>
+            )}
+            <p className="text-sm text-blue-100 mt-2">
+              {atsScore ? (
+                atsScore.score >= 80 ? 'Great job! Your resume is ATS optimized.' : 
+                'Upload an improved resume based on the blueprint to boost your score.'
+              ) : 'Upload your resume to see your ATS score.'}
+            </p>
           </div>
           <div className="flex gap-3">
-            <Button variant="outline" icon={FiFileText} onClick={() => navigate('/profile')}>
-              Manage Resume
+             <input
+                ref={resumeInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx"
+                onChange={handleResumeUpload}
+                className="hidden"
+                disabled={uploadingResume}
+              />
+            <Button variant="white" icon={uploadingResume ? FiRefreshCw : FiUpload} onClick={() => resumeInputRef.current?.click()} disabled={uploadingResume}>
+              {uploadingResume ? 'Uploading...' : atsScore ? 'Update Resume' : 'Upload Resume'}
             </Button>
-            <Button variant="primary" theme="orange" onClick={() => navigate('/profile/edit')}>
-              Update Skills
+            <Button variant="outline" className="text-blue-600 border-blue-600 hover:bg-blue-50" onClick={() => navigate('/profile/edit')}>
+              Update Profile
             </Button>
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div 
+          className="grid grid-cols-1 lg:grid-cols-12 gap-6"
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+        >
           
-          {/* LEFT COLUMN - Job Search & Filters (3 cols) */}
-          <div className="lg:col-span-3 space-y-6">
+          {/* LEFT COLUMN - Profile & Quick Actions (3 cols) */}
+          <div className="lg:col-span-3 space-y-4">
             
-            {/* Quick Search */}
+            {/* Profile Summary */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <div className="text-center">
+                <div className="w-20 h-20 mx-auto bg-gray-200 rounded-full flex items-center justify-center mb-3">
+                  {user.profile_picture ? (
+                    <img src={user.profile_picture} alt={user.first_name} className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    <FiUser className="text-gray-500 w-8 h-8" />
+                  )}
+                </div>
+                <h3 className="font-bold text-gray-900">{user.first_name} {user.last_name}</h3>
+                <p className="text-sm text-gray-500 mb-3">{user.headline || 'Job Seeker'}</p>
+                <div className="space-y-2">
+                  <div className="text-center">
+                    <span className="block font-bold text-gray-900">{user.projects?.length || 0}</span>
+                    <span className="text-xs text-gray-500">Projects</span>
+                  </div>
+                  <div className="text-center">
+                    <span className="block font-bold text-gray-900">{user.skills?.length || 0}</span>
+                    <span className="text-xs text-gray-500">Skills</span>
+                  </div>
+                </div>
+                <Button fullWidth variant="outline" size="sm" onClick={() => navigate('/profile')} className="mt-3">
+                  View Full Profile
+                </Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Connections Count */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <div className="text-center">
+n                <h3 className="font-bold text-gray-900">Connections</h3>
+                <p className="text-2xl font-bold text-blue-600 mt-1">342</p>
+                <p className="text-sm text-gray-500">Expand your network</p>
+                <Button variant="outline" size="sm" className="mt-3 w-full">Find Connections</Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Premium Offer */}
+            <motion.div variants={itemVariants}>
+            <Card className="bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200">
+              <div className="text-center">
+                <div className="text-2xl mb-2">⭐</div>
+                <h3 className="font-bold text-gray-900 text-sm mb-1">Try Premium Free</h3>
+                <p className="text-xs text-gray-600 mb-3">Get priority job applications and career insights</p>
+                <Button size="sm" className="bg-amber-600 text-white w-full">Start Free Trial</Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Saved Jobs */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                  <FiBookmark className="text-blue-500" /> Saved Jobs
+                </h3>
+                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">
+                  {savedJobs.length}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {savedJobs.slice(0, 3).map((job, idx) => (
+                  <div key={idx} className="flex gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center shrink-0">
+                      <FiBriefcase className="text-gray-500" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm text-gray-900 truncate">{job.title}</p>
+                      <p className="text-xs text-black truncate">{job.company}</p>
+                    </div>
+                  </div>
+                ))}
+                <Button variant="ghost" size="sm" fullWidth className="text-blue-600">View All Saved</Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Upcoming Interviews */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <h3 className="font-semibold text-gray-900 mb-4">Interviews</h3>
+              <div className="space-y-3">
+                {interviewSchedule.map((interview) => (
+                  <div key={interview.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                    <p className="font-bold text-gray-900 text-sm">{interview.company}</p>
+                    <p className="text-xs text-gray-600 mb-2">{interview.role}</p>
+                    <div className="flex justify-between text-xs text-blue-700 font-medium">
+                      <span>{interview.date}</span>
+                      <span>{interview.type}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+            </motion.div>
+          </div>
+
+          {/* MIDDLE COLUMN - Feed & Content Creation (6 cols) */}
+          <div className="lg:col-span-6 space-y-4">
+            
+            {/* Start a Post - LinkedIn Style */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <div className="flex items-center gap-3 p-3">
+                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                  {user.profile_picture ? (
+                    <img src={user.profile_picture} alt={user.first_name} className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    <FiUser className="text-gray-500" />
+                  )}
+                </div>
+                <button 
+                  onClick={() => {}}
+                  className="flex-1 text-left text-gray-500 bg-gray-100 rounded-full px-4 py-2 hover:bg-gray-200 transition-colors"
+                >
+                  Start a post
+                </button>
+              </div>
+              <div className="flex items-center justify-around px-3 pb-3 border-t border-gray-100">
+                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors">
+                  <FiUpload className="w-5 h-5" />
+                  <span className="text-sm">Photo</span>
+                </button>
+                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors">
+                  <FiVideo className="w-5 h-5" />
+                  <span className="text-sm">Video</span>
+                </button>
+                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors">
+                  <FiCalendar className="w-5 h-5" />
+                  <span className="text-sm">Event</span>
+                </button>
+                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors">
+                  <FiEdit2 className="w-5 h-5" />
+                  <span className="text-sm">Write article</span>
+                </button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Job Search Bar */}
+            <motion.div variants={itemVariants}>
             <Card>
               <h3 className="font-bold text-gray-900 mb-4">Find Jobs</h3>
               <div className="space-y-3">
@@ -199,65 +416,17 @@ const JobSeekerDashboardEnhanced = () => {
                   value={locationQuery}
                   onChange={(e) => setLocationQuery(e.target.value)}
                 />
-                <Button fullWidth theme="orange" onClick={handleSearch}>Search</Button>
+                <Button fullWidth theme="blue" onClick={handleSearch}>Search</Button>
               </div>
             </Card>
-
-            {/* Saved Jobs */}
-            <Card>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <FiBookmark className="text-orange-500" /> Saved Jobs
-                </h3>
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-                  {savedJobs.length}
-                </span>
-              </div>
-              <div className="space-y-3">
-                {savedJobs.slice(0, 3).map((job, idx) => (
-                  <div key={idx} className="flex gap-3 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                    <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center shrink-0">
-                      <FiBriefcase className="text-gray-500" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm text-gray-900 truncate">{job.title}</p>
-                      <p className="text-xs text-gray-500 truncate">{job.company}</p>
-                    </div>
-                  </div>
-                ))}
-                <Button variant="ghost" size="sm" fullWidth className="text-orange-600">View All Saved</Button>
-              </div>
-            </Card>
-
-            {/* Upcoming Interviews */}
-            <Card>
-              <h3 className="font-semibold text-gray-900 mb-4">Interviews</h3>
-              <div className="space-y-3">
-                {interviewSchedule.map((interview) => (
-                  <div key={interview.id} className="p-3 bg-orange-50 border border-orange-100 rounded-lg">
-                    <p className="font-bold text-gray-900 text-sm">{interview.company}</p>
-                    <p className="text-xs text-gray-600 mb-2">{interview.role}</p>
-                    <div className="flex justify-between text-xs text-orange-700 font-medium">
-                      <span>{interview.date}</span>
-                      <span>{interview.type}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </div>
-
-          {/* MIDDLE COLUMN - Feed & Recommendations (6 cols) */}
-          <div className="lg:col-span-6 space-y-6">
-            
-            {/* Create Post */}
-            <PostComposer onSubmit={handleCreatePost} placeholder="Share an update or ask for referrals..." />
+            </motion.div>
 
             {/* Job Recommendations */}
+            <motion.div variants={itemVariants}>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-bold text-gray-900">Recommended for You</h3>
-                <Button variant="ghost" size="sm" className="text-orange-600">View All</Button>
+                <Button variant="ghost" size="sm" className="text-blue-600">View All</Button>
               </div>
               
               {recommendedJobs.slice(0, 3).map((job) => (
@@ -275,73 +444,98 @@ const JobSeekerDashboardEnhanced = () => {
                       </div>
                     </div>
                     <div className="flex flex-col items-end justify-between">
-                      <button className="text-gray-400 hover:text-orange-500"><FiBookmark /></button>
+                      <button className="text-gray-400 hover:text-blue-500"><FiBookmark /></button>
                       <span className="text-xs text-gray-400">{formatDistanceToNow(new Date(job.created_at || Date.now()))}</span>
                     </div>
                   </div>
                 </Card>
               ))}
             </div>
+            </motion.div>
 
             {/* Community Feed */}
-            <div className="space-y-4 pt-4">
-              <h3 className="text-lg font-bold text-gray-900">Professional Network</h3>
-              <AnimatePresence>
-                {feedPosts.map((post) => (
-                  <motion.div
-                    key={post.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                  >
-                    <Card className="mb-4">
-                      <div className="flex items-center gap-3 mb-3">
-                        <img 
-                          src={post.user_picture || `https://ui-avatars.com/api/?name=${post.user_name}&background=random`} 
-                          alt={post.user_name} 
-                          className="w-10 h-10 rounded-full"
-                        />
-                        <div>
-                          <h4 className="font-semibold text-gray-900">{post.user_name}</h4>
-                          <p className="text-xs text-gray-500">
-                            {formatDistanceToNow(new Date(post.created_at || Date.now()), { addSuffix: true })}
-                          </p>
-                        </div>
+            <motion.div variants={itemVariants}>
+              <div className="space-y-4 pt-4">
+                <h3 className="text-lg font-bold text-gray-900">Professional Network</h3>
+                <AnimatePresence mode="popLayout">
+                  {feedPosts && feedPosts.length > 0 ? (
+                    feedPosts.map((post) => (
+                      <FeedCard
+                        key={post.id || post._id}
+                        post={post}
+                        currentUserId={user._id}
+                        onPostUpdate={(postId) => {
+                          setFeedPosts(prev => prev.filter(p => (p.id || p._id) !== postId));
+                          toast.success('Post deleted');
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-center py-12"
+                    >
+                      <div className="bg-gray-50 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
+                        <FiFileText className="text-gray-400 w-8 h-8" />
                       </div>
-                      <p className="text-gray-800 whitespace-pre-wrap mb-4">{post.content}</p>
-                      {post.images && post.images.length > 0 && (
-                        <div className="grid grid-cols-2 gap-2 mb-4">
-                          {post.images.map((img, i) => (
-                            <img key={i} src={img} alt="Post" className="rounded-lg w-full h-48 object-cover" />
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between pt-3 border-t border-gray-100 text-sm text-gray-500">
-                        <button className="hover:text-orange-600">Like ({post.likes?.length || 0})</button>
-                        <button className="hover:text-orange-600">Comment</button>
-                        <button className="hover:text-orange-600">Share</button>
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+                      <p className="text-gray-600 mb-2">No posts yet</p>
+                      <p className="text-sm text-gray-500">Be the first to share your ideas with the network!</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
           </div>
 
-          {/* RIGHT COLUMN - Application Status (3 cols) */}
-          <div className="lg:col-span-3 space-y-6">
+          {/* RIGHT COLUMN - News & Opportunities (3 cols) */}
+          <div className="lg:col-span-3 space-y-4">
+            
+            {/* Today's News & Views */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <h3 className="font-bold text-gray-900 mb-4">Today's news and views</h3>
+              <div className="space-y-3">
+                <div className="border-b border-gray-100 pb-3">
+                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Job Market Trends for 2024</h4>
+                  <p className="text-xs text-gray-500 mt-1">Forbes • 1h ago</p>
+                </div>
+                <div className="border-b border-gray-100 pb-3">
+                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Remote Work Salary Guide</h4>
+                  <p className="text-xs text-gray-500 mt-1">Remote.co • 3h ago</p>
+                </div>
+                <div className="pb-3">
+                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">AI Skills in High Demand</h4>
+                  <p className="text-xs text-gray-500 mt-1">Tech News • 5h ago</p>
+                </div>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Dream Job Advertisement */}
+            <motion.div variants={itemVariants}>
+            <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-100">
+              <div className="text-center">
+                <div className="text-3xl mb-2">🎯</div>
+                <h3 className="font-bold text-gray-900 text-sm mb-2">Your dream job is closer than you think</h3>
+                <p className="text-xs text-gray-600 mb-4">Top companies are looking for talent like you</p>
+                <Button size="sm" className="bg-blue-600 text-white w-full">See jobs</Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Application Status */}
+            <motion.div variants={itemVariants}>
             <Card>
               <h3 className="font-bold text-gray-900 mb-4">Application Status</h3>
               <div className="space-y-4">
                 {applications.length > 0 ? applications.map((app) => (
-                  <div key={app.id} className="border-l-2 border-gray-200 pl-3 py-1">
-                    <p className="font-medium text-sm text-gray-900">{app.job_title}</p>
-                    <p className="text-xs text-gray-500">{app.company_name}</p>
-                    <div className="mt-1 flex justify-between items-center">
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
-                        {app.status}
-                      </span>
-                      <span className="text-[10px] text-gray-400">2d ago</span>
-                    </div>
+                  <div key={app.id} className="border-l-4 border-blue-500 pl-3 py-2">
+                    <p className="text-xs text-gray-600 mb-1">{app.job?.title || 'Job Application'}</p>
+                    <p className="font-semibold text-sm text-black mb-2">{app.job?.company_name || 'Company'}</p>
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+                      {app.status}
+                    </span>
                   </div>
                 )) : (
                   <p className="text-sm text-gray-500">No active applications.</p>
@@ -349,26 +543,29 @@ const JobSeekerDashboardEnhanced = () => {
               </div>
               <Button variant="ghost" fullWidth className="mt-2 text-sm text-gray-600">View All Applications</Button>
             </Card>
+            </motion.div>
 
+            {/* Upcoming Interviews */}
+            <motion.div variants={itemVariants}>
             <Card>
-              <div className="flex items-center gap-2 mb-4">
-                <FiBell className="text-orange-500" />
-                <h3 className="font-bold text-gray-900">Notifications</h3>
-              </div>
+              <h3 className="font-bold text-gray-900 mb-4">Interviews</h3>
               <div className="space-y-3">
-                <div className="text-sm p-2 bg-gray-50 rounded">
-                  <p className="text-gray-900"><strong>Google</strong> viewed your application.</p>
-                  <p className="text-xs text-gray-500 mt-1">1 hour ago</p>
-                </div>
-                <div className="text-sm p-2 bg-gray-50 rounded">
-                  <p className="text-gray-900">New job alert: <strong>Senior React Dev</strong></p>
-                  <p className="text-xs text-gray-500 mt-1">3 hours ago</p>
-                </div>
+                {interviewSchedule.map((interview) => (
+                  <div key={interview.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                    <p className="font-bold text-gray-900 text-sm">{interview.company}</p>
+                    <p className="text-xs text-gray-600 mb-2">{interview.role}</p>
+                    <div className="flex justify-between text-xs text-blue-700 font-medium">
+                      <span>{interview.date}</span>
+                      <span>{interview.type}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </Card>
+            </motion.div>
           </div>
 
-        </div>
+        </motion.div>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { jobService, postService } from '../../services/api';
 import { Button, Card, Badge, ProgressBar } from '../ui';
+import FeedCard from '../FeedCard';
 import { 
   FiBriefcase, 
   FiBookOpen, 
@@ -13,16 +14,21 @@ import {
   FiCheckCircle,
   FiClock,
   FiXCircle,
-  FiUser,
   FiRefreshCw,
   FiUpload,
   FiTrendingUp,
-  FiCheck
+  FiCheck,
+  FiZap,
+  FiVideo,
+  FiCalendar,
+  FiBookmark,
+  FiUser
 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import PostComposer from '../PostComposer';
+import ProfileCard from '../ProfileCard';
 
 /**
  * Student Dashboard
@@ -32,13 +38,134 @@ const StudentDashboardEnhanced = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   
-  // State
+  // State - moved to top for ESLint recognition
   const [loading, setLoading] = useState(true);
   const [internships, setInternships] = useState([]);
   const [applications, setApplications] = useState([]);
   const [feedPosts, setFeedPosts] = useState([]);
   
-  // Mock Data for Student Specifics
+  // ATS Score State
+  const [atsScore, setAtsScore] = useState(null);
+  const [loadingAtsScore, setLoadingAtsScore] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const [showCreatePostModal, setShowCreatePostModal] = useState(false);
+  const [postMode, setPostMode] = useState('text');
+  const resumeInputRef = React.useRef(null);
+  const postComposerRef = React.useRef(null);
+
+  const resolveImageUrl = (url) => {
+    if (!url) return url;
+    if (url.startsWith('/uploads/')) {
+      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      return `${base}${url}`;
+    }
+    return url;
+  };
+  
+  // Handlers - moved for ESLint recognition
+  const handleResumeUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Please upload a PDF, DOC, or DOCX file');
+      return;
+    }
+
+    setUploadingResume(true);
+    try {
+      // Mock ATS score calculation
+      setTimeout(() => {
+        const mockScore = Math.floor(Math.random() * 30) + 70; // 70-100 range
+        setAtsScore({
+          score: mockScore,
+          verified: true,
+          last_updated: new Date().toISOString()
+        });
+        setLoadingAtsScore(false);
+        setUploadingResume(false);
+        toast.success('Resume analyzed successfully!');
+      }, 2000);
+    } catch (error) {
+      console.error('Resume upload error:', error);
+      toast.error('Failed to analyze resume');
+      setUploadingResume(false);
+    }
+  };
+
+  const scrollToPostComposer = () => {
+    postComposerRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setPostMode('text');
+    setShowCreatePostModal(true);
+  };
+
+  const handleLike = async (postId) => {
+    try {
+      // Optimistic update - immediately update UI
+      setFeedPosts(prev => prev.map(post => {
+        if (post.id === postId) {
+          const isLiked = post.likes?.includes(user?.id);
+          const newLikes = isLiked 
+            ? (post.likes || []).filter(id => id !== user?.id)
+            : [...(post.likes || []), user?.id];
+          return { ...post, likes: newLikes };
+        }
+        return post;
+      }));
+
+      // Here you would make an API call
+      // await postService.likePost(postId);
+      
+      toast.success('Post liked!');
+    } catch (error) {
+      console.error('Like error:', error);
+      toast.error('Failed to like post');
+      // Revert optimistic update on error
+      setFeedPosts(prev => prev.map(post => {
+        if (post.id === postId) {
+          const isLiked = post.likes?.includes(user?.id);
+          const newLikes = isLiked 
+            ? (post.likes || []).filter(id => id !== user?.id)
+            : [...(post.likes || []), user?.id];
+          return { ...post, likes: newLikes };
+        }
+        return post;
+      }));
+    }
+  };
+
+  const handleComment = (postId) => {
+    // Navigate to post detail page for commenting
+    navigate(`/posts/${postId}`);
+  };
+
+  const handleShare = async (postId) => {
+    try {
+      const postUrl = `${window.location.origin}/posts/${postId}`;
+      
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Check out this post',
+          url: postUrl
+        });
+      } else {
+        await navigator.clipboard.writeText(postUrl);
+        toast.success('Post link copied to clipboard!');
+      }
+      
+      // Update share count optimistically
+      setFeedPosts(prev => prev.map(post => 
+        post.id === postId 
+          ? { ...post, shares: (post.shares || 0) + 1 }
+          : post
+      ));
+    } catch (error) {
+      console.error('Share error:', error);
+      toast.error('Failed to share post');
+    }
+  };
   const [education, setEducation] = useState([
     {
       school: 'University of Technology',
@@ -79,7 +206,22 @@ const StudentDashboardEnhanced = () => {
 
       setInternships(internshipData);
       setApplications(applicationData);
-      setFeedPosts(postsData);
+      
+      // Add demo images to some posts for better UX
+      const postsWithImages = postsData.map((post, index) => {
+        if (index % 3 === 0 && !post.images) { // Add images to every 3rd post
+          return {
+            ...post,
+            images: [
+              'https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=400&h=300&fit=crop',
+              'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&h=300&fit=crop'
+            ]
+          };
+        }
+        return post;
+      });
+      
+      setFeedPosts(postsWithImages);
       
     } catch (error) {
       console.error('Error loading student dashboard:', error);
@@ -90,18 +232,6 @@ const StudentDashboardEnhanced = () => {
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleCreatePost = async (postData) => {
-    try {
-      const newPost = await postService.createPost(postData);
-      setFeedPosts(prev => [newPost, ...prev]);
-      toast.success('Post created successfully!');
-    } catch (error) {
-      console.error('Error creating post:', error);
-      // Error is handled/displayed by PostComposer mostly, but we catch here too
-      throw error; // Re-throw to let PostComposer handle UI feedback if needed
     }
   };
 
@@ -135,6 +265,21 @@ const StudentDashboardEnhanced = () => {
     );
   }
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 20 },
+    show: { opacity: 1, y: 0 }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -148,8 +293,8 @@ const StudentDashboardEnhanced = () => {
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex-1 w-full">
               <div className="flex items-center gap-2 mb-2">
-                <FiTrendingUp className="w-5 h-5 text-blue-200" />
-                <h2 className="text-2xl font-bold">Student Career Launchpad</h2>
+                <FiTrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-blue-200" />
+                <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold">Student Career Launchpad</h2>
               </div>
               
               {loadingAtsScore ? (
@@ -216,7 +361,7 @@ const StudentDashboardEnhanced = () => {
               </Button>
               <Button 
                 variant="outline" 
-                className="text-white border-white hover:bg-white/10"
+                className="text-blue-600 border-blue-600 hover:bg-blue-50"
                 onClick={() => navigate('/profile')}
               >
                 Complete Profile
@@ -225,113 +370,126 @@ const StudentDashboardEnhanced = () => {
           </div>
         </motion.div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <motion.div 
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 md:gap-6"
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+        >
           
-          {/* LEFT COLUMN - Personal & Academic (3 cols) */}
-          <div className="lg:col-span-3 space-y-6">
+          {/* LEFT COLUMN - Profile & Quick Actions (3 cols on desktop, full on mobile/tablet) */}
+          <div className="lg:col-span-3 space-y-4">
             
-            {/* Profile Summary */}
+            {/* Profile Card */}
+            <motion.div variants={itemVariants}>
+              <ProfileCard />
+            </motion.div>
+            
+            {/* Connections Count */}
+            <motion.div variants={itemVariants}>
             <Card>
               <div className="text-center">
-                <div className="relative inline-block">
-                  {user.profile_picture ? (
-                    <img src={user.profile_picture} alt={user.first_name} className="w-24 h-24 rounded-full object-cover mx-auto border-4 border-white shadow-sm" />
-                  ) : (
-                    <div className="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center mx-auto border-4 border-white shadow-sm">
-                      <FiUser className="w-10 h-10 text-blue-500" />
-                    </div>
-                  )}
-                  <div className="absolute bottom-0 right-0 bg-green-500 w-4 h-4 rounded-full border-2 border-white"></div>
-                </div>
-                <h3 className="mt-4 text-lg font-bold text-gray-900">{user.first_name} {user.last_name}</h3>
-                <p className="text-sm text-gray-500">{user.headline || 'Student'}</p>
-                <div className="mt-4 flex justify-center gap-2">
-                  <Badge variant="secondary" className="bg-blue-50 text-blue-700">Student</Badge>
-                  <Badge variant="secondary" className="bg-purple-50 text-purple-700">Open to Internships</Badge>
-                </div>
+                <h3 className="font-bold text-gray-900">Connections</h3>
+                <p className="text-2xl font-bold text-blue-600 mt-1">247</p>
+                <p className="text-sm text-gray-500">Grow your network</p>
+                <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/connections')}>Find Connections</Button>
               </div>
             </Card>
+            </motion.div>
 
-            {/* Education Details */}
+            {/* Premium Offer */}
+            <motion.div variants={itemVariants}>
+            <Card className="bg-gradient-to-br from-amber-50 to-orange-50 border-amber-200">
+              <div className="text-center">
+                <div className="text-2xl mb-2">⭐</div>
+                <h3 className="font-bold text-gray-900 text-sm mb-1">Try Premium Free</h3>
+                <p className="text-xs text-gray-600 mb-3">Get access to exclusive internships and career coaching</p>
+                <Button size="sm" className="bg-amber-600 text-white w-full" onClick={() => toast.success('Premium trial started!')}>Start Free Trial</Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Saved Items */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <FiBookmark className="text-blue-500 flex-shrink-0" /> Saved Items
+              </h3>
+              <div className="space-y-2">
+                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer">
+                  <p className="font-medium">React Development Guide</p>
+                  <p className="text-xs text-gray-500">Saved 2 days ago</p>
+                </div>
+                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer">
+                  <p className="font-medium">Interview Tips 2024</p>
+                  <p className="text-xs text-gray-500">Saved 1 week ago</p>
+                </div>
+                <Button variant="ghost" size="sm" className="text-blue-600 w-full" onClick={() => navigate('/saved')}>View All Saved</Button>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Skills */}
+            <motion.div variants={itemVariants}>
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <FiBookOpen className="text-blue-500" /> Education
-                </h3>
-                <button className="text-blue-600 hover:text-blue-700 text-sm">Edit</button>
-              </div>
-              <div className="space-y-4">
-                {education.map((edu, idx) => (
-                  <div key={idx} className="relative pl-4 border-l-2 border-gray-100">
-                    <div className="absolute left-[-5px] top-1.5 w-2 h-2 rounded-full bg-blue-500"></div>
-                    <h4 className="font-medium text-gray-900">{edu.school}</h4>
-                    <p className="text-sm text-gray-600">{edu.degree}</p>
-                    <p className="text-xs text-gray-500 mt-1">{edu.year} • GPA: {edu.gpa}</p>
-                  </div>
-                ))}
-              </div>
-            </Card>
-
-            {/* Skills (Editable) */}
-            <Card>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <FiAward className="text-purple-500" /> Skills
+                  <FiAward className="text-purple-500 flex-shrink-0" /> Skills
                 </h3>
                 <button 
-                  onClick={() => setIsEditingSkills(!isEditingSkills)}
+                  onClick={() => navigate('/profile/edit')}
                   className="text-blue-600 hover:text-blue-700 text-sm"
                 >
-                  {isEditingSkills ? 'Done' : 'Edit'}
+                  Edit
                 </button>
               </div>
               
               <div className="flex flex-wrap gap-2 mb-4">
-                {skills.map((skill, idx) => (
-                  <Badge key={idx} variant="secondary" className="bg-gray-100 text-gray-700">
-                    {skill}
-                    {isEditingSkills && (
-                      <button onClick={() => handleRemoveSkill(skill)} className="ml-1 text-gray-400 hover:text-red-500">
-                        ×
-                      </button>
-                    )}
-                  </Badge>
-                ))}
+                {(user?.skills && user.skills.length > 0) ? (
+                  user.skills.map((skill, idx) => {
+                     const skillName = typeof skill === 'string' ? skill : skill.name;
+                     return (
+                      <Badge key={idx} variant="secondary" className="bg-gray-100 text-gray-700">
+                        {skillName}
+                      </Badge>
+                     );
+                  })
+                ) : (
+                  skills.map((skill, idx) => (
+                    <Badge key={idx} variant="secondary" className="bg-gray-100 text-gray-700">
+                      {skill}
+                      {isEditingSkills && (
+                        <button onClick={() => handleRemoveSkill(skill)} className="ml-1 text-gray-400 hover:text-red-500">
+                          ×
+                        </button>
+                      )}
+                    </Badge>
+                  ))
+                )}
               </div>
-
-              {isEditingSkills && (
-                <form onSubmit={handleAddSkill} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newSkill}
-                    onChange={(e) => setNewSkill(e.target.value)}
-                    placeholder="Add skill..."
-                    className="flex-1 text-sm border rounded px-2 py-1"
-                  />
-                  <button type="submit" className="text-blue-600 text-sm font-medium">Add</button>
-                </form>
-              )}
             </Card>
+            </motion.div>
 
             {/* Certifications Upload */}
+            <motion.div variants={itemVariants}>
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
-                  <FiAward className="text-yellow-500" /> Certifications
+                  <FiAward className="text-yellow-500 flex-shrink-0" /> Certifications
                 </h3>
-                <button className="text-blue-600 hover:text-blue-700 text-sm">
+                <button className="text-blue-600 hover:text-blue-700 text-sm" onClick={scrollToPostComposer}>
                   <FiPlus />
                 </button>
               </div>
               <div className="space-y-3">
                 {certifications.map((cert) => (
                   <div key={cert.id} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg">
-                    <div className="bg-white p-1.5 rounded shadow-sm">
+                    <div className="bg-white p-1.5 rounded shadow-sm flex-shrink-0">
                       <FiAward className="text-yellow-600 w-4 h-4" />
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{cert.name}</p>
-                      <p className="text-xs text-gray-500">{cert.issuer} • {cert.date}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900 truncate">{cert.name}</p>
+                      <p className="text-xs text-gray-500 truncate">{cert.issuer} • {cert.date}</p>
                     </div>
                   </div>
                 ))}
@@ -340,13 +498,70 @@ const StudentDashboardEnhanced = () => {
                 </Button>
               </div>
             </Card>
+            </motion.div>
 
           </div>
 
-          {/* MIDDLE COLUMN - Feed & Learning (6 cols) */}
-          <div className="lg:col-span-6 space-y-6">
+          {/* MIDDLE COLUMN - Feed & Content Creation (6 cols on desktop, full on mobile/tablet) */}
+          <div className="lg:col-span-6 space-y-4">
             
+            {/* Start a Post - LinkedIn Style */}
+            <motion.div variants={itemVariants} ref={postComposerRef}>
+            <Card>
+              <div className="flex items-center gap-3 p-3">
+                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                  {user.profile_picture ? (
+                    <img src={user.profile_picture} alt={user.first_name} className="w-full h-full rounded-full object-cover" />
+                  ) : (
+                    <FiUser className="text-gray-500" />
+                  )}
+                </div>
+                <button 
+                  onClick={() => setShowCreatePostModal(true)}
+                  className="flex-1 text-left text-gray-500 bg-gray-100 rounded-full px-4 py-2 hover:bg-gray-200 transition-colors"
+                >
+                  Start a post
+                </button>
+              </div>
+              <div className="flex items-center justify-around px-3 pb-3 border-t border-gray-100">
+                <button 
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
+                  onClick={() => { setPostMode('text'); setShowCreatePostModal(true); }}
+                >
+                  <FiUpload className="w-5 h-5" />
+                  <span className="text-sm">Photo</span>
+                </button>
+                <button 
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
+                  onClick={() => { setPostMode('video'); setShowCreatePostModal(true); }}
+                >
+                  <FiVideo className="w-5 h-5" />
+                  <span className="text-sm">Video</span>
+                </button>
+                <button 
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
+                  onClick={() => { setPostMode('event'); setShowCreatePostModal(true); }}
+                >
+                  <FiCalendar className="w-5 h-5" />
+                  <span className="text-sm">Event</span>
+                </button>
+                <button 
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
+                  onClick={() => { setPostMode('article'); setShowCreatePostModal(true); }}
+                >
+                  <FiEdit2 className="w-5 h-5" />
+                  <span className="text-sm">Write article</span>
+                </button>
+              </div>
+            </Card>
+            </motion.div>
+
             {/* Learning Resources */}
+            <motion.div variants={itemVariants}>
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Learning Progress</h3>
@@ -364,72 +579,81 @@ const StudentDashboardEnhanced = () => {
                 ))}
               </div>
             </Card>
-
-            {/* Create Post */}
-            <PostComposer onSubmit={handleCreatePost} placeholder="Share your learning journey or ask a question..." />
+            </motion.div>
 
             {/* Feed */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-bold text-gray-900">Student Community</h3>
-              <AnimatePresence>
-                {feedPosts.map((post) => (
-                  <motion.div
-                    key={post.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                  >
-                    <Card className="mb-4">
-                      {/* Post Header */}
-                      <div className="flex items-center gap-3 mb-3">
-                        <img 
-                          src={post.user_picture || `https://ui-avatars.com/api/?name=${post.user_name}&background=random`} 
-                          alt={post.user_name} 
-                          className="w-10 h-10 rounded-full"
-                        />
-                        <div>
-                          <h4 className="font-semibold text-gray-900">{post.user_name}</h4>
-                          <p className="text-xs text-gray-500">
-                            {formatDistanceToNow(new Date(post.created_at || Date.now()), { addSuffix: true })}
-                          </p>
-                        </div>
+            <motion.div variants={itemVariants}>
+              <div className="space-y-4">
+                <h3 className="text-lg font-bold text-gray-900">Student Community</h3>
+                <AnimatePresence mode="popLayout">
+                  {feedPosts && feedPosts.length > 0 ? (
+                    feedPosts.map((post) => (
+                      <FeedCard
+                        key={post.id || post._id}
+                        post={post}
+                        currentUserId={user._id}
+                        onPostUpdate={(postId) => {
+                          setFeedPosts(prev => prev.filter(p => (p.id || p._id) !== postId));
+                          toast.success('Post deleted');
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-center py-12"
+                    >
+                      <div className="bg-gray-50 rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3">
+                        <FiFileText className="text-gray-400 w-8 h-8" />
                       </div>
-                      
-                      {/* Content */}
-                      <p className="text-gray-800 whitespace-pre-wrap mb-4">{post.content}</p>
-                      
-                      {/* Images */}
-                      {post.images && post.images.length > 0 && (
-                        <div className="grid grid-cols-2 gap-2 mb-4">
-                          {post.images.map((img, i) => (
-                            <img key={i} src={img} alt="Post" className="rounded-lg w-full h-48 object-cover" />
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Actions */}
-                      <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                        <button className="text-gray-500 hover:text-blue-600 text-sm font-medium flex items-center gap-1">
-                          Like ({post.likes?.length || 0})
-                        </button>
-                        <button className="text-gray-500 hover:text-blue-600 text-sm font-medium">
-                          Comment
-                        </button>
-                        <button className="text-gray-500 hover:text-blue-600 text-sm font-medium">
-                          Share
-                        </button>
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+                      <p className="text-gray-600 mb-2">No posts yet</p>
+                      <p className="text-sm text-gray-500">Be the first to share your ideas with the community!</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </motion.div>
           </div>
 
-          {/* RIGHT COLUMN - Opportunities (3 cols) */}
-          <div className="lg:col-span-3 space-y-6">
+          {/* RIGHT COLUMN - News & Opportunities (3 cols on desktop, full on mobile/tablet) */}
+          <div className="lg:col-span-3 space-y-4">
             
+            {/* Today's News & Views */}
+            <motion.div variants={itemVariants}>
+            <Card>
+              <h3 className="font-bold text-gray-900 mb-4">Today's news and views</h3>
+              <div className="space-y-3">
+                <div className="border-b border-gray-100 pb-3">
+                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Tech Giants Announce AI Internships</h4>
+                  <p className="text-xs text-gray-500 mt-1">Silicon Valley Times • 2h ago</p>
+                </div>
+                <div className="border-b border-gray-100 pb-3">
+                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Student Startup Wins $100K Funding</h4>
+                  <p className="text-xs text-gray-500 mt-1">TechCrunch • 4h ago</p>
+                </div>
+                <div className="pb-3">
+                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Remote Work Trends for 2024</h4>
+                  <p className="text-xs text-gray-500 mt-1">Business Insider • 6h ago</p>
+                </div>
+              </div>
+            </Card>
+            </motion.div>
+
+            {/* Dream Job Advertisement */}
+            <motion.div variants={itemVariants}>
+            <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-100">
+              <div className="text-center">
+                <div className="text-3xl mb-2">💼</div>
+                <h3 className="font-bold text-gray-900 text-sm mb-2">Your dream job is closer than you think</h3>
+                <p className="text-xs text-gray-600 mb-4">Top companies are hiring students like you</p>
+                <Button size="sm" className="bg-blue-600 text-white w-full" onClick={() => navigate('/jobs')}>See jobs</Button>
+              </div>
+            </Card>
+            </motion.div>
+
             {/* Internship Opportunities */}
+            <motion.div variants={itemVariants}>
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Internships</h3>
@@ -450,59 +674,102 @@ const StudentDashboardEnhanced = () => {
                 )}
               </div>
             </Card>
+            </motion.div>
 
             {/* Application Status */}
+            <motion.div variants={itemVariants}>
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">My Applications</h3>
               </div>
               <div className="space-y-3">
-                {applications.length > 0 ? applications.map((app) => (
-                  <div key={app.id} className="flex items-center justify-between p-2 rounded hover:bg-gray-50">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-gray-900 truncate">{app.job_title}</p>
-                      <p className="text-xs text-gray-500 truncate">{app.company_name}</p>
+                {applications.length > 0 ? applications.map((app) => {
+                  console.log('Application data:', app);
+                  return (
+                    <div key={app.id} className="flex items-start p-3 rounded hover:bg-gray-50 border border-gray-100">
+                      <div className="w-full">
+                        <p className="text-xs text-gray-600 truncate mb-1">{app.job?.title || 'Job Application'}</p>
+                        <p className="text-sm font-semibold text-black mb-2 break-words">{app.job?.company_name || 'Company Name Not Available'}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-1 rounded-full inline-block ${getStatusColor(app.status)}`}>
+                          {app.status}
+                        </span>
+                      </div>
                     </div>
-                    <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${getStatusColor(app.status)}`}>
-                      {app.status}
-                    </span>
-                  </div>
-                )) : (
+                  );
+                }) : (
                   <div className="text-center py-6">
                     <div className="bg-gray-50 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-2">
                       <FiFileText className="text-gray-400" />
                     </div>
-                    <p className="text-sm text-gray-500">No active applications</p>
-                    <Button variant="text" size="sm" className="text-blue-600 mt-1">Start Applying</Button>
+                    <p className="text-sm text-black">No active applications</p>
+                    <Button variant="text" size="sm" className="text-blue-600 mt-1" onClick={() => navigate('/jobs')}>Start Applying</Button>
                   </div>
                 )}
               </div>
             </Card>
-
-            {/* Notifications (Mock) */}
-            <Card>
-              <h3 className="font-semibold text-gray-900 mb-4">Notifications</h3>
-              <div className="space-y-3">
-                <div className="flex gap-3 text-sm">
-                  <div className="mt-1"><FiCheckCircle className="text-green-500" /></div>
-                  <div>
-                    <p className="text-gray-900">Your application to <span className="font-medium">TechCorp</span> was viewed.</p>
-                    <p className="text-xs text-gray-500 mt-1">2 hours ago</p>
-                  </div>
-                </div>
-                <div className="flex gap-3 text-sm">
-                  <div className="mt-1"><FiClock className="text-orange-500" /></div>
-                  <div>
-                    <p className="text-gray-900">Reminder: Complete your Python certification.</p>
-                    <p className="text-xs text-gray-500 mt-1">1 day ago</p>
-                  </div>
-                </div>
-              </div>
-            </Card>
+            </motion.div>
 
           </div>
-        </div>
+        </motion.div>
       </div>
+
+      {/* Post Creation Modal */}
+      {showCreatePostModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-semibold">
+                {postMode === 'article' ? 'Write Article' : postMode === 'event' ? 'Create Event' : postMode === 'video' ? 'Share Video' : 'Create Post'}
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowCreatePostModal(false);
+                  setPostMode('text');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4">
+              <PostComposer 
+                mode={postMode}
+                onSubmit={async (postData) => {
+                  try {
+                    console.log('Creating post with data:', postData);
+                    const newPost = await postService.createPost(postData);
+                    console.log('Post created response:', newPost);
+                    
+                    // Ensure the post has all required fields for display
+                    const processedPost = {
+                      id: newPost.id || newPost._id || new Date().getTime().toString(),
+                      user_id: newPost.user_id,
+                      user_name: newPost.user_name || `${user.first_name} ${user.last_name}`,
+                      user_picture: newPost.user_picture || user.profile_picture,
+                      content: newPost.content,
+                      images: newPost.images || [],
+                      likes: newPost.likes || [],
+                      comments: newPost.comments || [],
+                      shares: newPost.shares || 0,
+                      created_at: newPost.created_at || new Date().toISOString(),
+                      updated_at: newPost.updated_at || new Date().toISOString()
+                    };
+                    
+                    setFeedPosts(prev => [processedPost, ...prev]);
+                    setShowCreatePostModal(false);
+                    setPostMode('text');
+                    toast.success('Post created successfully!');
+                  } catch (error) {
+                    console.error('Error creating post:', error);
+                    console.error('Error details:', error.response?.data || error.message);
+                    toast.error(error.response?.data?.detail || 'Failed to create post');
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

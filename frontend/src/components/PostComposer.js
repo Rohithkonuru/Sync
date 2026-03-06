@@ -1,14 +1,18 @@
 import React, { useState, useRef } from 'react';
-import { FiImage, FiX, FiSend } from 'react-icons/fi';
+import { FiImage, FiX, FiSend, FiVideo, FiCalendar, FiFileText } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { postService } from '../services/api';
 import { getErrorMessage } from '../utils/errorHelpers';
 
-const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLength = 2000 }) => {
+const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLength = 2000, mode = 'text' }) => {
   const [content, setContent] = useState('');
   const [images, setImages] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const [title, setTitle] = useState('');
+  const [eventDetails, setEventDetails] = useState({ title: '', date: '', time: '', location: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef(null);
+  const videoInputRef = useRef(null);
 
   const handleImageSelect = (e) => {
     const files = Array.from(e.target.files);
@@ -33,16 +37,57 @@ const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLengt
     });
   };
 
+  const handleVideoSelect = (e) => {
+    const files = Array.from(e.target.files);
+    const videoFiles = files.filter(file => file.type.startsWith('video/') || file.type === 'video/mp4');
+    
+    if (videoFiles.length > 1) {
+      toast.error('Maximum 1 video allowed');
+      return;
+    }
+
+    videoFiles.forEach(file => {
+      if (file.size > 100 * 1024 * 1024) {
+        toast.error('Video file is too large. Maximum size is 100MB');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setVideos([{ file, preview: reader.result, name: file.name }]);
+        toast.success('Video added');
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const removeImage = (index) => {
     setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const removeVideo = () => {
+    setVideos([]);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!content.trim() && images.length === 0) {
-      toast.error('Please add some content or images');
-      return;
+    // Validation based on mode
+    if (mode === 'article') {
+      if (!title.trim() || !content.trim()) {
+        toast.error('Please add a title and content for the article');
+        return;
+      }
+    } else if (mode === 'event') {
+      if (!eventDetails.title.trim() || !eventDetails.date || !content.trim()) {
+        toast.error('Please add event title, date, and description');
+        return;
+      }
+    } else {
+      if (!content.trim() && images.length === 0 && videos.length === 0) {
+        toast.error('Please add some content, images, or videos');
+        return;
+      }
     }
 
     if (content.length > maxLength) {
@@ -70,18 +115,36 @@ const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLengt
         }
       }
 
-      await onSubmit({
+      // Build post data based on mode
+      const postData = {
         content: content.trim(),
         images: uploadedImageUrls,
-      });
+        type: mode
+      };
+
+      if (mode === 'article') {
+        postData.title = title.trim();
+      } else if (mode === 'event') {
+        postData.eventDetails = eventDetails;
+        postData.title = eventDetails.title;
+      } else if (mode === 'video') {
+        postData.hasVideo = videos.length > 0;
+        postData.videoName = videos[0]?.name;
+      }
+
+      await onSubmit(postData);
       setContent('');
+      setTitle('');
       setImages([]);
+      setVideos([]);
+      setEventDetails({ title: '', date: '', time: '', location: '' });
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      // Toast success is handled by parent or assumed success here if no error throw
+      if (videoInputRef.current) {
+        videoInputRef.current.value = '';
+      }
     } catch (error) {
-      // Error handled by parent usually, but we catch here to stop submitting state
       console.error('Post creation error:', error);
       toast.error(getErrorMessage(error) || 'Failed to create post');
     } finally {
@@ -92,33 +155,107 @@ const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLengt
   return (
     <div className="bg-white rounded-xl border border-neutral-200 shadow-soft p-4">
       <form onSubmit={handleSubmit}>
+        {/* Article Mode - Title Input */}
+        {mode === 'article' && (
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Article title..."
+            maxLength={150}
+            className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-neutral-900 placeholder-neutral-400 mb-3 font-semibold text-lg"
+          />
+        )}
+
+        {/* Event Mode - Event Details */}
+        {mode === 'event' && (
+          <div className="space-y-3 mb-3">
+            <input
+              type="text"
+              value={eventDetails.title}
+              onChange={(e) => setEventDetails({ ...eventDetails, title: e.target.value })}
+              placeholder="Event title..."
+              className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-neutral-900 placeholder-neutral-400 font-semibold"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="date"
+                value={eventDetails.date}
+                onChange={(e) => setEventDetails({ ...eventDetails, date: e.target.value })}
+                className="px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
+              <input
+                type="time"
+                value={eventDetails.time}
+                onChange={(e) => setEventDetails({ ...eventDetails, time: e.target.value })}
+                className="px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
+            </div>
+            <input
+              type="text"
+              value={eventDetails.location}
+              onChange={(e) => setEventDetails({ ...eventDetails, location: e.target.value })}
+              placeholder="Event location..."
+              className="w-full px-4 py-2 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-neutral-900 placeholder-neutral-400"
+            />
+          </div>
+        )}
+
+        {/* Content Textarea */}
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder={placeholder}
-          rows={4}
+          placeholder={mode === 'article' ? 'Write your article...' : mode === 'event' ? 'Event description...' : mode === 'video' ? 'Describe your video...' : placeholder}
+          rows={mode === 'article' ? 8 : 4}
           maxLength={maxLength}
           className="w-full px-4 py-3 border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none text-neutral-900 placeholder-neutral-400"
         />
         
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center space-x-2">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2 text-neutral-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
-              title="Add images"
-            >
-              <FiImage className="w-5 h-5" />
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleImageSelect}
-              className="hidden"
-            />
+            {mode === 'text' || mode === 'article' || mode === 'event' ? (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 text-neutral-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                title="Add images"
+              >
+                <FiImage className="w-5 h-5" />
+              </button>
+            ) : null}
+            
+            {mode === 'video' && (
+              <button
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                className="p-2 text-neutral-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                title="Add video"
+              >
+                <FiVideo className="w-5 h-5" />
+              </button>
+            )}
+
+            {mode !== 'video' && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleImageSelect}
+                className="hidden"
+              />
+            )}
+            
+            {mode === 'video' && (
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleVideoSelect}
+                className="hidden"
+              />
+            )}
+
             <span className="text-xs text-neutral-500">
               {content.length}/{maxLength}
             </span>
@@ -126,13 +263,33 @@ const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLengt
 
           <button
             type="submit"
-            disabled={isSubmitting || (!content.trim() && images.length === 0)}
+            disabled={isSubmitting || (!content.trim() && images.length === 0 && videos.length === 0)}
             className="flex items-center space-x-2 px-6 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
           >
             <FiSend className="w-4 h-4" />
-            <span>Post</span>
+            <span>{isSubmitting ? 'Posting...' : 'Post'}</span>
           </button>
         </div>
+
+        {/* Video Preview */}
+        {videos.length > 0 && (
+          <div className="mt-4">
+            <div className="relative bg-neutral-100 rounded-lg overflow-hidden">
+              <div className="p-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-neutral-700">{videos[0].name}</span>
+                <button
+                  type="button"
+                  onClick={removeVideo}
+                  className="p-1 bg-error-600 text-white rounded-full hover:bg-error-700"
+                >
+                  <FiX className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Image Previews */}
 
         {/* Image Previews */}
         {images.length > 0 && (

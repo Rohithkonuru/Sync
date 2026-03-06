@@ -13,6 +13,15 @@ const Feed = () => {
   const [newPost, setNewPost] = useState('');
   const [commentInputs, setCommentInputs] = useState({});
 
+  const resolveImageUrl = (url) => {
+    if (!url) return url;
+    if (url.startsWith('/uploads/')) {
+      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      return `${base}${url}`;
+    }
+    return url;
+  };
+
   useEffect(() => {
     fetchPosts();
   }, []);
@@ -169,7 +178,7 @@ const Feed = () => {
                 {post.images.map((image, imgIndex) => (
                   <motion.img
                     key={imgIndex}
-                    src={image}
+                    src={resolveImageUrl(image)}
                     alt="Post image"
                     className="w-full rounded-lg"
                     initial={{ opacity: 0 }}

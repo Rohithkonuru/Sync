@@ -35,7 +35,7 @@ const RecruiterDashboard = () => {
       ]);
 
       // Calculate stats
-      const openJobs = (jobsData || []).filter(job => job.status === 'open');
+      const openJobs = (jobsData || []).filter(job => job.status === 'active');
       
       // We would need to fetch applications for all jobs to get total applicants count accurately
       // For now, we'll use a simplified approach or mock if needed. 
@@ -131,9 +131,9 @@ const RecruiterDashboard = () => {
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => navigate(`/jobs/${job.id}/applications`)}
+                        onClick={() => navigate(`/recruiter/jobs/${job.id}/applicants`)}
                       >
-                        Manage Applications
+                        Job Applications
                       </Button>
                     </div>
                   ))

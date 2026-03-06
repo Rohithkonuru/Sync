@@ -19,12 +19,12 @@ const Card = ({
 }) => {
   const paddingClasses = {
     none: '',
-    sm: 'p-3',
-    md: 'p-6',
-    lg: 'p-8',
+    sm: 'p-3 sm:p-4',
+    md: 'p-4 sm:p-6',
+    lg: 'p-6 sm:p-8',
   };
 
-  const baseClasses = 'bg-white rounded-xl border border-neutral-200 shadow-soft';
+  const baseClasses = 'bg-white rounded-xl border border-neutral-200 shadow-soft w-full';
   const hoverClasses = hover || clickable ? 'hover:shadow-medium transition-shadow cursor-pointer' : '';
   const clickableClasses = clickable ? 'focus:outline-none focus:ring-2 focus:ring-primary-500' : '';
 

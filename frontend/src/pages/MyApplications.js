@@ -108,7 +108,7 @@ const MyApplications = () => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">My Applications</h1>
-        <p className="text-gray-600 mt-2">Track the status of your job applications</p>
+        <p className="text-gray-800 mt-2">Track the status of your job applications</p>
       </div>
 
       <ApplicationsList
@@ -166,14 +166,14 @@ const ApplicationCard = ({ application, isHighlighted, onView }) => {
             </span>
           </div>
 
-          <div className="text-gray-600 mb-2">
+          <div className="text-gray-800 mb-2">
             <span className="font-medium">{job.company_name || 'Unknown Company'}</span>
             {job.location && <span className="mx-2">•</span>}
             {job.location && <span>{job.location}</span>}
           </div>
 
           {application.applied_at && (
-            <div className="flex items-center text-sm text-gray-500 mb-3">
+            <div className="flex items-center text-sm text-gray-700 mb-3">
               <FiClock className="w-4 h-4 mr-1" />
               Applied {formatDistanceToNow(new Date(application.applied_at), { addSuffix: true })}
             </div>
@@ -184,11 +184,11 @@ const ApplicationCard = ({ application, isHighlighted, onView }) => {
               <p className="text-sm font-medium text-gray-700 mb-2">Latest Update:</p>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm text-gray-800">
                     Status changed to <span className="font-medium capitalize">{application.status.replace('-', ' ')}</span>
                   </span>
                   {application.status_history[application.status_history.length - 1].updated_at && (
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-gray-700">
                       {formatDistanceToNow(
                         new Date(application.status_history[application.status_history.length - 1].updated_at),
                         { addSuffix: true }
@@ -197,7 +197,7 @@ const ApplicationCard = ({ application, isHighlighted, onView }) => {
                   )}
                 </div>
                 {application.status_history[application.status_history.length - 1].note && (
-                  <p className="text-sm text-gray-600 mt-2">
+                  <p className="text-sm text-gray-700 mt-2">
                     {application.status_history[application.status_history.length - 1].note}
                   </p>
                 )}
@@ -245,8 +245,8 @@ const ApplicationDetailModal = ({ application, onClose }) => {
           {/* Job Info */}
           <div>
             <h3 className="text-lg font-semibold mb-2">{job.title || 'Unknown Job'}</h3>
-            <p className="text-gray-600">{job.company_name || 'Unknown Company'}</p>
-            {job.location && <p className="text-gray-600">{job.location}</p>}
+            <p className="text-gray-800">{job.company_name || 'Unknown Company'}</p>
+            {job.location && <p className="text-gray-800">{job.location}</p>}
           </div>
 
           {/* Status */}
@@ -289,12 +289,12 @@ const ApplicationDetailModal = ({ application, onClose }) => {
                           >
                             {history.status.replace('-', ' ')}
                           </span>
-                          <span className="text-xs text-gray-500">
+                          <span className="text-xs text-gray-700">
                             {formatDistanceToNow(new Date(history.updated_at), { addSuffix: true })}
                           </span>
                         </div>
                         {history.note && (
-                          <p className="text-sm text-gray-600 mt-1">{history.note}</p>
+                          <p className="text-sm text-gray-700 mt-1">{history.note}</p>
                         )}
                       </div>
                     </div>
@@ -310,25 +310,25 @@ const ApplicationDetailModal = ({ application, onClose }) => {
               {application.full_name && (
                 <div>
                   <span className="text-sm font-medium text-gray-700">Name:</span>{' '}
-                  <span className="text-sm text-gray-600">{application.full_name}</span>
+                  <span className="text-sm text-gray-800">{application.full_name}</span>
                 </div>
               )}
               {application.email && (
                 <div>
                   <span className="text-sm font-medium text-gray-700">Email:</span>{' '}
-                  <span className="text-sm text-gray-600">{application.email}</span>
+                  <span className="text-sm text-gray-800">{application.email}</span>
                 </div>
               )}
               {application.contact_number && (
                 <div>
                   <span className="text-sm font-medium text-gray-700">Contact:</span>{' '}
-                  <span className="text-sm text-gray-600">{application.contact_number}</span>
+                  <span className="text-sm text-gray-800">{application.contact_number}</span>
                 </div>
               )}
               {application.experience_years !== null && application.experience_years !== undefined && (
                 <div>
                   <span className="text-sm font-medium text-gray-700">Experience:</span>{' '}
-                  <span className="text-sm text-gray-600">{application.experience_years} years</span>
+                  <span className="text-sm text-gray-800">{application.experience_years} years</span>
                 </div>
               )}
             </div>
@@ -339,7 +339,7 @@ const ApplicationDetailModal = ({ application, onClose }) => {
             <div>
               <h4 className="font-semibold mb-2">Cover Letter</h4>
               <div className="bg-gray-50 rounded-lg p-4">
-                <p className="text-gray-700 whitespace-pre-wrap">{application.cover_letter}</p>
+                <p className="text-gray-800 whitespace-pre-wrap">{application.cover_letter}</p>
               </div>
             </div>
           )}

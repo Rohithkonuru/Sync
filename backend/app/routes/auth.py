@@ -39,10 +39,10 @@ async def register(
     import json
     
     # Validate resume requirement for student/professional/job_seeker
-    if user_type in ['student', 'professional', 'job_seeker'] and not resume_file:
+    if user_type in ['student', 'job_seeker'] and not resume_file:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Resume upload is required for students, professionals, and job seekers"
+            detail="Resume upload is required for students and job seekers"
         )
     
     # Process resume file if provided
@@ -106,6 +106,29 @@ async def register(
         "company_industry": company_industry,
         "company_size": company_size,
     }
+    
+    # Remove None values
+    user_dict = {k: v for k, v in user_dict.items() if v is not None}
+    
+    user = await create_user(user_dict)
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=settings.jwt_expire_minutes)
+    access_token = create_access_token(
+        data={"sub": str(user["_id"])}, expires_delta=access_token_expires
+    )
+    
+    user_response = user_to_dict(user)
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_response
+    }
+
+@router.post("/register/simple", response_model=Token)
+async def register_simple(user_data: UserCreate):
+    """Simple registration without file upload"""
+    user_dict = user_data.dict()
     
     # Remove None values
     user_dict = {k: v for k, v in user_dict.items() if v is not None}

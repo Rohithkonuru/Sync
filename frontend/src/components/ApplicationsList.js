@@ -57,8 +57,8 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
     return (
       <div className="text-center py-12">
         <FiBriefcase className="w-16 h-16 mx-auto text-neutral-300 mb-4" />
-        <h3 className="text-lg font-semibold text-neutral-700 mb-2">No Applications</h3>
-        <p className="text-neutral-500">You haven't applied to any jobs yet.</p>
+        <h3 className="text-lg font-semibold text-black mb-2">No Applications</h3>
+        <p className="text-black">You haven't applied to any jobs yet.</p>
       </div>
     );
   }
@@ -86,10 +86,10 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-semibold text-neutral-900 mb-1 truncate">
+                    <h3 className="text-lg font-semibold text-black mb-1 truncate">
                       {application.job?.title || 'Job Application'}
                     </h3>
-                    <p className="text-sm text-neutral-600">
+                    <p className="text-sm text-black">
                       {application.job?.company_name || 'Company'}
                       {application.job?.location && ` • ${application.job.location}`}
                     </p>
@@ -101,7 +101,7 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
                     {getStatusIcon(application.status)}
                     <span>{getStatusLabel(application.status)}</span>
                   </span>
-                  <span className="text-xs text-neutral-500">
+                  <span className="text-xs text-black">
                     Applied {formatDistanceToNow(new Date(application.applied_at || application.created_at), { addSuffix: true })}
                   </span>
                 </div>
@@ -111,13 +111,13 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
                     {application.skills.slice(0, 3).map((skill, idx) => (
                       <span
                         key={idx}
-                        className="px-2 py-1 bg-neutral-100 text-neutral-700 text-xs rounded-md"
+                        className="px-2 py-1 bg-neutral-100 text-black text-xs rounded-md"
                       >
                         {skill}
                       </span>
                     ))}
                     {application.skills.length > 3 && (
-                      <span className="px-2 py-1 text-neutral-500 text-xs">
+                      <span className="px-2 py-1 text-black text-xs">
                         +{application.skills.length - 3} more
                       </span>
                     )}
@@ -132,7 +132,7 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
                       e.stopPropagation();
                       onDownloadResume(application.id);
                     }}
-                    className="p-2 text-neutral-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
+                    className="p-2 text-black hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
                     title="Download Resume"
                   >
                     <FiDownload className="w-5 h-5" />
@@ -152,30 +152,30 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
             <div className="border-t border-neutral-200 bg-neutral-50 p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div>
-                  <h4 className="text-sm font-semibold text-neutral-700 mb-2">Application Details</h4>
+                  <h4 className="text-sm font-semibold text-black mb-2">Application Details</h4>
                   <div className="space-y-2 text-sm">
                     {application.full_name && (
                       <div>
-                        <span className="text-neutral-600">Full Name:</span>
-                        <span className="ml-2 text-neutral-900">{application.full_name}</span>
+                        <span className="text-black">Full Name:</span>
+                        <span className="ml-2 text-black">{application.full_name}</span>
                       </div>
                     )}
                     {application.email && (
                       <div>
-                        <span className="text-neutral-600">Email:</span>
-                        <span className="ml-2 text-neutral-900">{application.email}</span>
+                        <span className="text-black">Email:</span>
+                        <span className="ml-2 text-black">{application.email}</span>
                       </div>
                     )}
                     {application.contact_number && (
                       <div>
-                        <span className="text-neutral-600">Contact:</span>
-                        <span className="ml-2 text-neutral-900">{application.contact_number}</span>
+                        <span className="text-black">Contact:</span>
+                        <span className="ml-2 text-black">{application.contact_number}</span>
                       </div>
                     )}
                     {application.experience_years !== null && application.experience_years !== undefined && (
                       <div>
-                        <span className="text-neutral-600">Experience:</span>
-                        <span className="ml-2 text-neutral-900">{application.experience_years} years</span>
+                        <span className="text-black">Experience:</span>
+                        <span className="ml-2 text-black">{application.experience_years} years</span>
                       </div>
                     )}
                   </div>
@@ -183,15 +183,15 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
 
                 {application.cover_letter && (
                   <div>
-                    <h4 className="text-sm font-semibold text-neutral-700 mb-2">Cover Letter</h4>
-                    <p className="text-sm text-neutral-700 line-clamp-4">{application.cover_letter}</p>
+                    <h4 className="text-sm font-semibold text-black mb-2">Cover Letter</h4>
+                    <p className="text-sm text-black line-clamp-4">{application.cover_letter}</p>
                   </div>
                 )}
               </div>
 
               {showTimeline && application.status_history && application.status_history.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-semibold text-neutral-700 mb-4">Status History</h4>
+                  <h4 className="text-sm font-semibold text-black mb-4">Status History</h4>
                   <ApplicationTimeline history={application.status_history} />
                 </div>
               )}

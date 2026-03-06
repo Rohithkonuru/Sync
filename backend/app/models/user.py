@@ -70,6 +70,7 @@ class UserCreate(UserBase):
     education: Optional[List[Education]] = None
     experience: Optional[List[Experience]] = None
     projects: Optional[List[Project]] = None
+    gender: Optional[str] = None  # Male, Female, Prefer not to say
     
     # Company details (for recruiter)
     company_name: Optional[str] = None
@@ -94,6 +95,7 @@ class UserUpdate(BaseModel):
     projects: Optional[List[Project]] = None
     certifications: Optional[List[Certification]] = None
     resume_url: Optional[str] = None
+    gender: Optional[str] = None  # Male, Female, Prefer not to say
 
 class UserResponse(BaseModel):
     id: str
@@ -115,6 +117,11 @@ class UserResponse(BaseModel):
     resume_url: Optional[str] = None
     ats_score: Optional[dict] = None
     ats_score_updated: Optional[datetime] = None
+    sync_score: int = 0
+    sync_score_updated: Optional[datetime] = None
+    growth_score: int = 0
+    growth_score_updated: Optional[datetime] = None
+    gender: Optional[str] = None  # Only visible to recruiters in analytics
     connections: List[str] = []
     connection_requests: List[str] = []
     created_at: datetime

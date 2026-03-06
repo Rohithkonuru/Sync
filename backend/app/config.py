@@ -12,7 +12,7 @@ class Settings:
         self.jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
         self.jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))  # 24 hours
         self.upload_dir: str = os.getenv("UPLOAD_DIR", "./uploads")
-        cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000")
+        cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
         self.cors_origins: List[str] = [origin.strip() for origin in cors_origins_str.split(",")]
 
 settings = Settings()

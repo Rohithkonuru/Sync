@@ -27,32 +27,34 @@ const Messages = () => {
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
-    loadConversations();
-    // Add demo conversations if no conversations exist
-    if (conversations.length === 0 && !loading) {
-      addDemoConversations();
+    if (user) {
+      loadConversations();
     }
-  }, []);
+  }, [user]);
 
-  const addDemoConversations = () => {
+  const generateDemoConversations = () => {
+    // If user is not available, we can still generate demo conversations 
+    // but we need a placeholder for the current user id
+    const currentUserId = user?.id || 'current-user';
+
     const demoConversations = [
       {
         user_id: 'demo-1',
         user_name: 'Sarah Johnson',
-        user_picture: null,
+        user_picture: 'https://ui-avatars.com/api/?name=Sarah+Johnson&background=random',
         last_message: {
-          content: 'Hey! Thanks for connecting. I saw your post about the job opening.',
+          content: 'Hi! I noticed your profile and thought you would be a great fit for our Senior React Developer role.',
           created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
         },
-        unread_count: 2,
+        unread_count: 1,
         updated_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
       },
       {
         user_id: 'demo-2',
         user_name: 'Michael Chen',
-        user_picture: null,
+        user_picture: 'https://ui-avatars.com/api/?name=Michael+Chen&background=random',
         last_message: {
-          content: 'Great to meet you! Let\'s schedule a call this week.',
+          content: 'Thanks for the connection request! I would love to discuss the project details.',
           created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
         },
         unread_count: 0,
@@ -61,20 +63,20 @@ const Messages = () => {
       {
         user_id: 'demo-3',
         user_name: 'Emily Rodriguez',
-        user_picture: null,
+        user_picture: 'https://ui-avatars.com/api/?name=Emily+Rodriguez&background=random',
         last_message: {
-          content: 'I\'d love to learn more about your experience in software development.',
+          content: 'Are you available for a quick call tomorrow at 10 AM?',
           created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
         },
-        unread_count: 1,
+        unread_count: 3,
         updated_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
       },
       {
         user_id: 'demo-4',
         user_name: 'David Kim',
-        user_picture: null,
+        user_picture: 'https://ui-avatars.com/api/?name=David+Kim&background=random',
         last_message: {
-          content: 'Thanks for sharing that article! Very insightful.',
+          content: 'I have reviewed your portfolio, and it looks impressive! Great work on the dashboard project.',
           created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
         },
         unread_count: 0,
@@ -87,60 +89,65 @@ const Messages = () => {
         {
           id: 'msg-1',
           sender_id: 'demo-1',
-          receiver_id: user.id,
-          content: 'Hey! Thanks for connecting. I saw your post about the job opening.',
-          created_at: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-          read_at: null,
-        },
-        {
-          id: 'msg-2',
-          sender_id: user.id,
-          receiver_id: 'demo-1',
-          content: 'Hi Sarah! Yes, I\'m looking for a software engineer position.',
-          created_at: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
-          read_at: new Date(Date.now() - 7 * 60 * 1000).toISOString(),
-        },
-        {
-          id: 'msg-3',
-          sender_id: 'demo-1',
-          receiver_id: user.id,
-          content: 'That\'s great! I might have some opportunities. Can we chat?',
+          receiver_id: currentUserId,
+          content: 'Hi! I noticed your profile and thought you would be a great fit for our Senior React Developer role.',
           created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
           read_at: null,
-        },
+        }
       ],
       'demo-2': [
         {
           id: 'msg-4',
           sender_id: 'demo-2',
-          receiver_id: user.id,
+          receiver_id: currentUserId,
           content: 'Great to meet you! Let\'s schedule a call this week.',
           created_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
           read_at: new Date(Date.now() - 2 * 60 * 60 * 1000 + 5 * 60 * 1000).toISOString(),
         },
         {
           id: 'msg-5',
-          sender_id: user.id,
+          sender_id: currentUserId,
           receiver_id: 'demo-2',
           content: 'Sounds good! I\'m available Tuesday or Wednesday.',
           created_at: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(),
           read_at: new Date(Date.now() - 1.5 * 60 * 60 * 1000 + 2 * 60 * 1000).toISOString(),
         },
+        {
+            id: 'msg-6',
+            sender_id: 'demo-2',
+            receiver_id: currentUserId,
+            content: 'Thanks for the connection request! I would love to discuss the project details.',
+            created_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+            read_at: null,
+        }
       ],
+      'demo-3': [
+          {
+              id: 'msg-7',
+              sender_id: 'demo-3',
+              receiver_id: currentUserId,
+              content: 'Are you available for a quick call tomorrow at 10 AM?',
+              created_at: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
+              read_at: null,
+          }
+      ],
+      'demo-4': [
+          {
+              id: 'msg-8',
+              sender_id: 'demo-4',
+              receiver_id: currentUserId,
+              content: 'I have reviewed your portfolio, and it looks impressive! Great work on the dashboard project.',
+              created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+              read_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000).toISOString(),
+          }
+      ]
     };
 
     // Store demo messages in localStorage for persistence
     localStorage.setItem('demoMessages', JSON.stringify(demoMessages));
     localStorage.setItem('demoConversations', JSON.stringify(demoConversations));
     
-    setConversations(demoConversations);
-    setFilteredConversations(demoConversations);
-    
-    // Load demo messages if selected user is a demo user
-    if (selectedUser && selectedUser.user_id.startsWith('demo-')) {
-      const stored = JSON.parse(localStorage.getItem('demoMessages') || '{}');
-      setMessages(stored[selectedUser.user_id] || []);
-    }
+    return demoConversations;
   };
 
   useEffect(() => {
@@ -214,40 +221,48 @@ const Messages = () => {
         socket.off('message_read');
       }
     };
-  }, [socket, selectedUser]);
+  }, [socket, selectedUser, user]);
 
   const loadConversations = async () => {
     try {
       setLoading(true);
-      const data = await messageService.getConversations();
+      let data = [];
+      try {
+        if (user) {
+            data = await messageService.getConversations();
+        }
+      } catch (err) {
+        console.warn('Failed to fetch conversations from API', err);
+      }
       
       // Load demo conversations if no real conversations
-      const demoConversations = JSON.parse(localStorage.getItem('demoConversations') || '[]');
+      let demoConversations = JSON.parse(localStorage.getItem('demoConversations') || '[]');
+      
+      if (data.length === 0 && demoConversations.length === 0) {
+        demoConversations = generateDemoConversations();
+      }
+
       const allConversations = [...data, ...demoConversations];
       
-      const sorted = allConversations.sort((a, b) => {
+      // Remove duplicates based on user_id
+      const uniqueConversations = Array.from(new Map(allConversations.map(item => [item.user_id, item])).values());
+      
+      const sorted = uniqueConversations.sort((a, b) => {
         const dateA = a.last_message?.created_at || a.updated_at || 0;
         const dateB = b.last_message?.created_at || b.updated_at || 0;
         return new Date(dateB) - new Date(dateA);
       });
+      
       setConversations(sorted);
       setFilteredConversations(sorted);
+      
+      // Auto-select first conversation if none selected
       if (sorted.length > 0 && !selectedUser) {
         setSelectedUser(sorted[0]);
       }
     } catch (error) {
       console.error('Failed to load conversations:', error);
-      // Load demo conversations on error
-      const demoConversations = JSON.parse(localStorage.getItem('demoConversations') || '[]');
-      if (demoConversations.length > 0) {
-        setConversations(demoConversations);
-        setFilteredConversations(demoConversations);
-        if (!selectedUser) {
-          setSelectedUser(demoConversations[0]);
-        }
-      } else {
-      toast.error('Failed to load conversations');
-      }
+      // Don't show toast for this, as it might be expected in demo mode
     } finally {
       setLoading(false);
     }
@@ -269,7 +284,7 @@ const Messages = () => {
       if (error.response?.status === 403) {
         toast.error('You must be connected to message this user');
       } else {
-      toast.error('Failed to load messages');
+        toast.error('Failed to load messages');
       }
     }
   };

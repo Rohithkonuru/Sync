@@ -10,6 +10,7 @@ from app.middleware.auth_middleware import get_current_user
 from app.database import get_database
 from app.services.auth import get_user_by_id, user_to_dict
 from app.services.notifications import create_notification
+from app.services.sync_score import SyncScoreService
 from app.services.socket_manager import broadcast_post
 
 router = APIRouter()
@@ -21,7 +22,7 @@ def post_to_dict(post: dict) -> dict:
         "id": str(post["_id"]),
         "user_id": post.get("user_id"),
         "user_name": post.get("user_name"),
-        "user_avatar": post.get("user_avatar"),
+        "user_picture": post.get("user_picture") or post.get("user_avatar"),
         "user_role": post.get("user_role", "professional"),
         "user_headline": post.get("user_headline", ""),
         "content": post.get("content", ""),
@@ -39,7 +40,7 @@ async def enrich_post_with_user_data(post: dict) -> dict:
         user = await get_user_by_id(post["user_id"])
         if user:
             post["user_name"] = f"{user.get('first_name')} {user.get('last_name')}"
-            post["user_avatar"] = user.get("profile_picture")
+            post["user_picture"] = user.get("profile_picture")
             post["user_headline"] = user.get("headline", "")
             post["user_role"] = user.get("user_type", "professional")
     except Exception:
@@ -86,17 +87,48 @@ async def upload_post_image(
             detail=f"Failed to upload image: {str(e)}"
         )
 
-@router.post("", response_model=PostResponse)
-async def create_post(post_data: PostCreate, current_user: dict = Depends(get_current_user)):
+@router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_post(post_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a post (only by the owner)"""
     try:
         db = get_database()
         
-        # Create post document
+        # Check if post exists
+        post = await db.posts.find_one({"_id": ObjectId(post_id)})
+        if not post:
+            raise HTTPException(status_code=404, detail="Post not found")
+        
+        # Check ownership
+        if post["user_id"] != str(current_user["_id"]):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this post")
+            
+        # Delete post
+        await db.posts.delete_one({"_id": ObjectId(post_id)})
+        
+        # Optional: Delete associated notifications, comments, etc.
+        
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete post: {str(e)}"
+        )
+
+@router.post("", response_model=PostResponse)
+async def create_post(post_data: PostCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new post"""
+    try:
+        db = get_database()
+        
         post_dict = {
             "user_id": str(current_user["_id"]),
             "user_name": f"{current_user.get('first_name')} {current_user.get('last_name')}",
-            "user_avatar": current_user.get("avatar_url"), # Add avatar if available
-            "user_role": current_user.get("user_type", "professional"), # Add user role
+            "user_picture": current_user.get("profile_picture"),
+            "user_avatar": current_user.get("profile_picture"),
+            "user_role": current_user.get("user_type", "professional"),
+            "user_headline": current_user.get("headline", ""),
             "content": post_data.content,
             "images": post_data.images,
             "likes": [],
@@ -114,6 +146,13 @@ async def create_post(post_data: PostCreate, current_user: dict = Depends(get_cu
         
         # Broadcast the new post
         await broadcast_post(post_response)
+        
+        # Record sync score activity
+        try:
+            sync_score_service = SyncScoreService()
+            await sync_score_service.record_activity(str(current_user["_id"]), "post_created")
+        except Exception as e:
+            print(f"Warning: Failed to record post creation activity: {str(e)}")
         
         return post_response
     except Exception as e:
@@ -215,7 +254,7 @@ async def get_post(post_id: str):
     
     return post_to_dict(post)
 
-@router.post("/{post_id}/like")
+@router.post("/{post_id}/like", response_model=PostResponse)
 async def like_post(
     post_id: str,
     current_user: dict = Depends(get_current_user)
@@ -236,14 +275,13 @@ async def like_post(
         # Unlike
         await db.posts.update_one(
             {"_id": ObjectId(post_id)},
-            {"$pull": {"likes": user_id}}
+            {"$pull": {"likes": user_id}, "$set": {"updated_at": datetime.utcnow()}}
         )
-        return {"liked": False}
     else:
         # Like
         await db.posts.update_one(
             {"_id": ObjectId(post_id)},
-            {"$addToSet": {"likes": user_id}}
+            {"$addToSet": {"likes": user_id}, "$set": {"updated_at": datetime.utcnow()}}
         )
         
         # Create notification if not own post
@@ -256,10 +294,12 @@ async def like_post(
                 related_user_id=user_id,
                 related_post_id=post_id
             )
-        
-        return {"liked": True}
+    
+    # Return updated post
+    updated_post = await db.posts.find_one({"_id": ObjectId(post_id)})
+    return post_to_dict(updated_post)
 
-@router.post("/{post_id}/comment", response_model=Comment)
+@router.post("/{post_id}/comment", response_model=PostResponse)
 async def add_comment(
     post_id: str,
     content: str = Query(...),
@@ -299,9 +339,11 @@ async def add_comment(
             related_post_id=post_id
         )
     
-    return comment
+    # Return updated post
+    updated_post = await db.posts.find_one({"_id": ObjectId(post_id)})
+    return post_to_dict(updated_post)
 
-@router.post("/{post_id}/share")
+@router.post("/{post_id}/share", response_model=PostResponse)
 async def share_post(
     post_id: str,
     current_user: dict = Depends(get_current_user)
@@ -311,19 +353,36 @@ async def share_post(
     if not ObjectId.is_valid(post_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
     
+    post = await db.posts.find_one({"_id": ObjectId(post_id)})
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+    
     await db.posts.update_one(
         {"_id": ObjectId(post_id)},
-        {"$inc": {"shares": 1}}
+        {"$inc": {"shares": 1}, "$set": {"updated_at": datetime.utcnow()}}
     )
     
-    return {"message": "Post shared"}
+    # Create notification if not own post
+    if post["user_id"] != str(current_user["_id"]):
+        await create_notification(
+            user_id=post["user_id"],
+            type="share",
+            title="Post Shared",
+            message=f"{current_user.get('first_name')} {current_user.get('last_name')} shared your post",
+            related_user_id=str(current_user["_id"]),
+            related_post_id=post_id
+        )
+    
+    # Return updated post
+    updated_post = await db.posts.find_one({"_id": ObjectId(post_id)})
+    return post_to_dict(updated_post)
 
 @router.delete("/{post_id}")
 async def delete_post(
     post_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Delete a post"""
+    """Delete a post (only the creator can delete)"""
     db = get_database()
     if not ObjectId.is_valid(post_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
@@ -332,14 +391,14 @@ async def delete_post(
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
     
+    # Check if user is the creator
     if post["user_id"] != str(current_user["_id"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this post"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only delete your own posts")
     
+    # Delete the post
     await db.posts.delete_one({"_id": ObjectId(post_id)})
-    return {"message": "Post deleted"}
+    
+    return {"message": "Post deleted successfully", "post_id": post_id}
 
 @router.post("/{post_id}/save")
 async def save_post(
@@ -467,36 +526,4 @@ async def get_feed(
     
     return [post_to_dict(post) for post in enriched_posts]
 
-async def enrich_post_with_user_data(post: dict) -> dict:
-    """Enrich post with current user data (headline, company, etc.)"""
-    if not post or not post.get("user_id"):
-        return post
-    
-    try:
-        user = await get_user_by_id(post["user_id"])
-        if user:
-            # Update user headline with company if available
-            user_headline = user.get("headline", "")
-            if user.get("company"):
-                if user_headline:
-                    user_headline = f"{user_headline} at {user.get('company')}"
-                else:
-                    user_headline = f"Professional at {user.get('company')}"
-            post["user_headline"] = user_headline
-            # Update user picture if not already set
-            if not post.get("user_picture") and user.get("profile_picture"):
-                post["user_picture"] = user.get("profile_picture")
-    except Exception:
-        # If user lookup fails, keep existing data
-        pass
-    
-    return post
-
-def post_to_dict(post: dict) -> dict:
-    """Convert post document to response dict"""
-    if not post:
-        return None
-    post["id"] = str(post["_id"])
-    post.pop("_id", None)
-    return post
 

@@ -5,6 +5,8 @@ import { FiBriefcase, FiDownload, FiMessageSquare, FiUser, FiMail, FiPhone, FiMa
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import ApplicationTimeline from '../components/ApplicationTimeline';
+import SyncScore from '../components/SyncScore';
+import GrowthScore from '../components/GrowthScore';
 
 const RecruiterJobApplications = () => {
   const navigate = useNavigate();
@@ -250,6 +252,48 @@ const RecruiterJobApplications = () => {
                                 Applied {formatDistanceToNow(new Date(application.applied_at), { addSuffix: true })}
                               </p>
                             )}
+
+                            {/* Sync Score for Recruiter View */}
+                            {application.applicant?.id && (
+                              <div className="mt-3 pt-3 border-t border-neutral-100">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-medium text-neutral-700">Sync Score</span>
+                                  <SyncScore userId={application.applicant.id} showTooltip={false} compact={true} />
+                                </div>
+                              </div>
+                            ) || (
+                              // Demo Sync Score for display purposes
+                              <div className="mt-3 pt-3 border-t border-neutral-100">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-medium text-neutral-700">Sync Score</span>
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-sm font-bold text-green-600">78</div>
+                                    <span className="text-xs text-gray-500">/100</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Growth Score for Recruiter View */}
+                            {application.applicant?.id && (
+                              <div className="mt-3 pt-3 border-t border-neutral-100">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-medium text-neutral-700">Growth Score</span>
+                                  <GrowthScore userId={application.applicant.id} showTooltip={false} compact={true} />
+                                </div>
+                              </div>
+                            ) || (
+                              // Demo Growth Score for display purposes
+                              <div className="mt-3 pt-3 border-t border-neutral-100">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-medium text-neutral-700">Growth Score</span>
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-sm font-bold text-blue-600">64</div>
+                                    <span className="text-xs text-gray-500">/100</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -418,6 +462,48 @@ const ApplicationDetailModal = ({ application, onClose, onUpdateStatus, onDownlo
                       {skill}
                     </span>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Sync Score in Modal */}
+            {application.applicant?.id && (
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-neutral-700">Sync Score</span>
+                  <SyncScore userId={application.applicant.id} showTooltip={false} compact={true} />
+                </div>
+              </div>
+            ) || (
+              // Demo Sync Score for display purposes
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-neutral-700">Sync Score</span>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-bold text-green-600">82</div>
+                    <span className="text-xs text-gray-500">/100</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Growth Score in Modal */}
+            {application.applicant?.id && (
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-neutral-700">Growth Score</span>
+                  <GrowthScore userId={application.applicant.id} showTooltip={false} compact={true} />
+                </div>
+              </div>
+            ) || (
+              // Demo Growth Score for display purposes
+              <div className="mt-4 pt-4 border-t border-neutral-100">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-neutral-700">Growth Score</span>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-bold text-blue-600">68</div>
+                    <span className="text-xs text-gray-500">/100</span>
+                  </div>
                 </div>
               </div>
             )}

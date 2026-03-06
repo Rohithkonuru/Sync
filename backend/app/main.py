@@ -54,41 +54,39 @@ socket_app = ASGIApp(sio, app)
 
 @app.get("/")
 async def read_root():
-    # If frontend build exists, serve it
-    if os.path.exists(frontend_build_dir):
-        return FileResponse(os.path.join(frontend_build_dir, "index.html"))
-    return {"message": "Sync API is running", "version": "1.0.0"}
+    return {"message": "Sync API is running", "version": "1.0.0", "frontend": "Running on http://localhost:3000"}
 
 @app.get("/api/health")
 def health_check():
     return {"status": "healthy"}
 
-# Serve React Frontend (Production)
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Serve React Frontend (Production) - Disabled for development
+# current_dir = os.path.dirname(os.path.abspath(__file__))
 # Navigate: backend/app -> backend -> Sync -> frontend/build
 # current_dir is .../backend/app
 # dirname(current_dir) is .../backend
 # dirname(dirname(current_dir)) is .../Sync
-frontend_build_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "frontend", "build")
+# frontend_build_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "frontend", "build")
 
-if os.path.exists(frontend_build_dir):
-    # Mount static assets
-    app.mount("/static", StaticFiles(directory=os.path.join(frontend_build_dir, "static")), name="static")
+# if os.path.exists(frontend_build_dir):
+#     static_dir = os.path.join(frontend_build_dir, "static")
+#     if os.path.exists(static_dir):
+#         app.mount("/static", StaticFiles(directory=static_dir), name="static")
     
-    # Catch-all route for SPA
-    @app.get("/{full_path:path}")
-    async def serve_react_app(full_path: str):
-        # Allow API routes to pass through if they weren't caught (shouldn't happen for valid APIs)
-        if full_path.startswith("api/") or full_path.startswith("uploads/"):
-             raise HTTPException(status_code=404, detail="Not Found")
+#     # Catch-all route for SPA
+#     @app.get("/{full_path:path}")
+#     async def serve_react_app(full_path: str):
+#         # Allow API routes to pass through if they weren't caught (shouldn't happen for valid APIs)
+#         if full_path.startswith("api/") or full_path.startswith("uploads/"):
+#              raise HTTPException(status_code=404, detail="Not Found")
         
-        # Check if file exists in build root (e.g. favicon.ico, manifest.json)
-        file_path = os.path.join(frontend_build_dir, full_path)
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
+#         # Check if file exists in build root (e.g. favicon.ico, manifest.json)
+#         file_path = os.path.join(frontend_build_dir, full_path)
+#         if os.path.exists(file_path) and os.path.isfile(file_path):
+#             return FileResponse(file_path)
             
-        # Return index.html for all other routes (SPA)
-        return FileResponse(os.path.join(frontend_build_dir, "index.html"))
+#         # Return index.html for all other routes (SPA)
+#         return FileResponse(os.path.join(frontend_build_dir, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn

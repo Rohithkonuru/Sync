@@ -10,7 +10,8 @@ from app.models.user import UserResponse, UserUpdate
 from app.middleware.auth_middleware import get_current_user
 from app.database import get_database
 from app.services.auth import get_user_by_id, user_to_dict
-from app.services.notifications import create_notification
+from app.services.sync_score import SyncScoreService
+from app.services.growth_score import get_growth_score_service
 
 router = APIRouter()
 
@@ -677,5 +678,166 @@ async def get_ats_score(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to calculate ATS score: {str(e)}"
+        )
+
+# Sync Score Endpoints
+@router.get("/me/sync-score")
+async def get_my_sync_score(current_user: dict = Depends(get_current_user)):
+    """Get current user's sync score"""
+    sync_score_service = SyncScoreService()
+    return await sync_score_service.get_sync_score(current_user["_id"], current_user["_id"], current_user.get("user_type"))
+
+@router.get("/{user_id}/sync-score")
+async def get_user_sync_score(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get another user's sync score (only visible to recruiters)"""
+    # Check if current user is a recruiter
+    if current_user.get("user_type") != "recruiter":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only recruiters can view other users' sync scores"
+        )
+
+    sync_score_service = SyncScoreService()
+    result = await sync_score_service.get_sync_score(user_id, current_user["_id"], current_user.get("user_type"))
+
+    if "error" in result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result["error"]
+        )
+
+    return result
+
+@router.post("/activity/{activity_type}")
+async def record_user_activity(
+    activity_type: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Record user activity and update sync score"""
+    valid_activities = [
+        "profile_completion", "resume_uploaded", "ats_score_generated",
+        "post_created", "like_or_comment", "job_application",
+        "profile_update", "daily_active"
+    ]
+
+    if activity_type not in valid_activities:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid activity type. Valid types: {', '.join(valid_activities)}"
+        )
+
+    sync_score_service = SyncScoreService()
+    new_score = await sync_score_service.record_activity(current_user["_id"], activity_type)
+
+    return {
+        "message": f"Activity '{activity_type}' recorded successfully",
+        "new_sync_score": new_score
+    }
+
+@router.post("/sync-score/update")
+async def update_sync_score(current_user: dict = Depends(get_current_user)):
+    """Manually update sync score (for testing/admin purposes)"""
+    sync_score_service = SyncScoreService()
+    new_score = await sync_score_service.update_sync_score(current_user["_id"])
+
+    return {
+        "message": "Sync score updated successfully",
+        "sync_score": new_score
+    }
+
+# Growth Score endpoints
+@router.get("/me/growth-score")
+async def get_my_growth_score(current_user: dict = Depends(get_current_user)):
+    """Get current user's Growth Score"""
+    try:
+        growth_score_service = get_growth_score_service()
+        growth_score_data = await growth_score_service.get_growth_score(
+            current_user["_id"], 
+            current_user["_id"], 
+            current_user.get("user_type", "")
+        )
+        
+        if not growth_score_data:
+            return {"growth_score": 0, "growth_score_updated": None}
+        
+        return growth_score_data
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching growth score: {str(e)}"
+        )
+
+@router.get("/{user_id}/growth-score")
+async def get_user_growth_score(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get another user's Growth Score (recruiter access)"""
+    try:
+        # Check if requester has access
+        requester_id = current_user["_id"]
+        requester_role = current_user.get("user_type", "")
+        
+        growth_score_service = get_growth_score_service()
+        growth_score_data = await growth_score_service.get_growth_score(
+            user_id, 
+            requester_id, 
+            requester_role
+        )
+        
+        if not growth_score_data:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied or growth score not found"
+            )
+        
+        return growth_score_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error fetching growth score: {str(e)}"
+        )
+
+@router.post("/growth-score/update")
+async def update_growth_score(current_user: dict = Depends(get_current_user)):
+    """Manually update growth score (for testing/admin purposes)"""
+    try:
+        growth_score_service = get_growth_score_service()
+        new_score = await growth_score_service.update_growth_score(current_user["_id"])
+        
+        return {
+            "message": "Growth score updated successfully",
+            "growth_score": new_score
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating growth score: {str(e)}"
+        )
+
+@router.post("/activity/{activity_type}")
+async def record_user_activity(
+    activity_type: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Record user activity for Growth Score calculation"""
+    try:
+        growth_score_service = get_growth_score_service()
+        await growth_score_service.record_activity(current_user["_id"], activity_type)
+        
+        return {"message": f"Activity {activity_type} recorded successfully"}
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error recording activity: {str(e)}"
         )
 

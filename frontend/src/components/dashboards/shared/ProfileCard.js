@@ -2,6 +2,7 @@ import React from 'react';
 import { Card, Badge, Button } from '../../ui';
 import { FiUser, FiMapPin, FiBriefcase } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
+import SyncScore from '../../SyncScore';
 
 const ProfileCard = ({ user, badges = [], completionPercentage = null, showEdit = true }) => {
   const navigate = useNavigate();
@@ -41,6 +42,11 @@ const ProfileCard = ({ user, badges = [], completionPercentage = null, showEdit 
               {badge.label}
             </Badge>
           ))}
+        </div>
+
+        {/* Sync Score */}
+        <div className="mt-4">
+          <SyncScore userId={user?.id} showTooltip={false} compact={true} />
         </div>
 
         {completionPercentage !== null && (

@@ -22,6 +22,23 @@ export const SocketProvider = ({ children }) => {
   const pollingIntervalRef = useRef(null);
   const lastNotificationIdRef = useRef(null);
 
+  // Disable WebSocket for now - use polling only
+  useEffect(() => {
+    // Only use polling fallback for notifications
+    if (!pollingIntervalRef.current) {
+      pollingIntervalRef.current = setInterval(() => {
+        pollNotifications();
+      }, 10000); // Poll every 10 seconds
+    }
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, []);
+
   // Polling fallback function
   const pollNotifications = async () => {
     try {
@@ -47,109 +64,20 @@ export const SocketProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    if (user && token) {
-      const socketUrl = process.env.REACT_APP_SOCKET_URL || 'http://localhost:8000';
-      const newSocket = io(`${socketUrl}`, {
-        auth: { token },
-        query: { token },
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionAttempts: 5,
-      });
-
-      newSocket.on('connect', () => {
-        console.log('Socket connected');
-        setIsConnected(true);
-        // Clear polling if socket connects
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-          pollingIntervalRef.current = null;
-        }
-        // Join user's room
-        newSocket.emit('join_room', { room: user.id });
-      });
-
-      newSocket.on('disconnect', () => {
-        console.log('Socket disconnected');
-        setIsConnected(false);
-        // Start polling fallback
-        if (!pollingIntervalRef.current) {
-          pollingIntervalRef.current = setInterval(pollNotifications, 10000); // Poll every 10 seconds
-        }
-      });
-
-      newSocket.on('connect_error', (error) => {
-        console.error('Socket connection error:', error);
-        setIsConnected(false);
-        // Start polling fallback on connection error
-        if (!pollingIntervalRef.current) {
-          pollingIntervalRef.current = setInterval(pollNotifications, 10000);
-        }
-      });
-
-      newSocket.on('notification', (data) => {
-        setNotifications((prev) => {
-          // Avoid duplicates
-          if (prev.some(n => n.id === data.id)) {
-            return prev;
-          }
-          return [data, ...prev];
-        });
-        setUnreadCount((prev) => prev + 1);
-        lastNotificationIdRef.current = data.id;
-      });
-
-      newSocket.on('new_message', (data) => {
-        // Handle new message - can be used by Message components
-        console.log('New message:', data);
-      });
-
-      newSocket.on('application_status_update', (data) => {
-        // Handle application status update
-        console.log('Application status update:', data);
-        // Create a notification-like entry
-        setNotifications((prev) => [{
-          id: `status_${Date.now()}`,
-          type: 'application_status_update',
-          title: 'Application Status Updated',
-          message: data.message || 'Your application status has been updated',
-          read: false,
-          created_at: new Date().toISOString(),
-        }, ...prev]);
-        setUnreadCount((prev) => prev + 1);
-      });
-
-      newSocket.on('new_post', (data) => {
-        // Handle new post
-        console.log('New post:', data);
-      });
-
-      setSocket(newSocket);
-
-      // Initial notification load
-      pollNotifications();
-
-      return () => {
-        newSocket.close();
-        if (pollingIntervalRef.current) {
-          clearInterval(pollingIntervalRef.current);
-        }
-      };
+    // Only use polling fallback for notifications
+    if (!pollingIntervalRef.current) {
+      pollingIntervalRef.current = setInterval(() => {
+        pollNotifications();
+      }, 10000); // Poll every 10 seconds
     }
-  }, [user, token]);
 
-  // Start polling if socket is not connected
-  useEffect(() => {
-    if (!isConnected && user && !pollingIntervalRef.current) {
-      pollingIntervalRef.current = setInterval(pollNotifications, 10000);
-    }
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
     };
-  }, [isConnected, user]);
+  }, []);
 
   const markNotificationRead = async (notificationId) => {
     setNotifications((prev) =>
@@ -167,18 +95,29 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
+  const value = {
+    socket: null,
+    notifications,
+    unreadCount,
+    isConnected: false,
+    sendNotification: async (userId, notificationData) => {
+      // Fallback: create notification via API
+      try {
+        await notificationService.createNotification({
+          user_id: userId,
+          ...notificationData
+        });
+      } catch (error) {
+        console.error('Error sending notification:', error);
+      }
+    },
+    markNotificationRead,
+    setUnreadCount,
+    refreshNotifications: pollNotifications,
+  };
+
   return (
-    <SocketContext.Provider
-      value={{
-        socket,
-        notifications,
-        unreadCount,
-        isConnected,
-        markNotificationRead,
-        setUnreadCount,
-        refreshNotifications: pollNotifications,
-      }}
-    >
+    <SocketContext.Provider value={value}>
       {children}
     </SocketContext.Provider>
   );

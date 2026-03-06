@@ -44,6 +44,7 @@ const UnifiedDashboard = () => {
     { id: 2, title: 'React.js Fundamentals', progress: 30 },
   ]);
   const [atsScore, setAtsScore] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
 
   // -- Job Creation State (Recruiter Only) --
   const [showCreateJobModal, setShowCreateJobModal] = useState(false);
@@ -55,10 +56,42 @@ const UnifiedDashboard = () => {
     salary_min: '', salary_max: '', skills: [], requirements: [], benefits: [], experience_level: 'mid',
   });
 
+  // -- Tab State --
+  const [activeTab, setActiveTab] = useState('overview');
+
   // -- Helpers --
   const isRecruiter = user?.user_type === 'recruiter';
+  const isProfessional = user?.user_type === 'professional';
   const isStudent = user?.user_type === 'student' || user?.user_type === 'job_seeker';
   const { notifications, socket } = useSocket();
+
+  // -- Tab Configuration --
+  const getTabs = () => {
+    if (isRecruiter) {
+      return [
+        { id: 'active_jobs', title: 'Active Jobs', value: recruiterStats.activeJobs, icon: FiBriefcase, color: 'blue', trend: '+2 this week' },
+        { id: 'applicants', title: 'Total Applicants', value: recruiterStats.totalApplicants, icon: FiUsers, color: 'indigo', trend: '+12 this week' },
+        { id: 'shortlisted', title: 'Shortlisted', value: recruiterStats.shortlisted, icon: FiCheckCircle, color: 'emerald', trend: '4 candidates' },
+        { id: 'interviews', title: 'Interviews', value: recruiterStats.interviews, icon: FiCalendar, color: 'purple', trend: '2 scheduled' },
+      ];
+    } else if (isProfessional) {
+       return [
+        { id: 'profile_views', title: 'Profile Views', value: '1.2k', icon: FiEye, color: 'blue', trend: '+12%' },
+        { id: 'impressions', title: 'Post Impressions', value: '3.8k', icon: FiTrendingUp, color: 'indigo', trend: '+24%' },
+        { id: 'connections', title: 'Connections', value: '1,523', icon: FiUsers, color: 'emerald', trend: '+15' },
+        { id: 'search_appearances', title: 'Search Appearances', value: '156', icon: FiSearch, color: 'purple', trend: '+5%' },
+      ];
+    } else {
+      return [
+        { id: 'applied', title: 'Jobs Applied', value: myApplications.length, icon: FiBriefcase, color: 'blue' },
+        { id: 'interviews', title: 'Interviews', value: myApplications.filter(a => a.status === 'interview').length, icon: FiUsers, color: 'indigo' },
+        { id: 'profile_views', title: 'Profile Views', value: 24, icon: FiEye, color: 'emerald' },
+        { id: 'learning', title: 'Learning Hours', value: 12, icon: FiBookOpen, color: 'purple' },
+      ];
+    }
+  };
+
+  const tabs = getTabs();
 
   // -- Load Data --
   useEffect(() => {
@@ -118,14 +151,16 @@ const UnifiedDashboard = () => {
   };
 
   const loadStudentData = async () => {
-    const [jobsData, appsData, postsData] = await Promise.all([
+    const [jobsData, appsData, postsData, suggestionsData] = await Promise.all([
       jobService.getJobs({ limit: 5 }).catch(() => []),
       jobService.getApplications({ limit: 5 }).catch(() => []),
-      postService.getPosts({ limit: 10 }).catch(() => [])
+      postService.getPosts({ limit: 10 }).catch(() => []),
+      userService.getSuggestions().catch(() => [])
     ]);
     setInternships(jobsData); // Using internships state for general jobs preview
     setMyApplications(appsData);
     setFeedPosts(postsData);
+    setSuggestions(suggestionsData || []);
     
     // Mock ATS Score check
     if (user.resume) {
@@ -141,6 +176,9 @@ const UnifiedDashboard = () => {
     if (!jobFormData.title) errors.push('Job Title');
     if (!jobFormData.description) errors.push('Description');
     if (!jobFormData.location) errors.push('Location');
+    if (!jobFormData.job_type) errors.push('Job Type');
+    if (!jobFormData.skills || jobFormData.skills.length === 0) errors.push('Required Skills');
+    if (!jobFormData.experience_level) errors.push('Experience Level');
     
     if (errors.length > 0) {
       toast.error(`Missing required fields: ${errors.join(', ')}`);
@@ -288,6 +326,29 @@ const UnifiedDashboard = () => {
     }
   };
 
+  const handleDeletePost = async (postId) => {
+    if (window.confirm('Are you sure you want to delete this post?')) {
+      try {
+        await postService.deletePost(postId);
+        setFeedPosts(prev => prev.filter(p => p.id !== postId));
+        toast.success('Post deleted successfully');
+      } catch (error) {
+        const msg = error?.response?.data?.detail || 'Failed to delete post';
+        toast.error(typeof msg === 'string' ? msg : 'Failed to delete post');
+      }
+    }
+  };
+
+  const handleConnectSuggestion = async (userId) => {
+    try {
+      await userService.sendConnectionRequestNew(userId);
+      toast.success('Connection request sent');
+      setSuggestions(prev => prev.map(u => u.id === userId ? { ...u, requested: true } : u));
+    } catch (error) {
+      toast.error('Failed to send request');
+    }
+  };
+
   // -- Real-time application status updates for non-recruiters --
   useEffect(() => {
     if (!isRecruiter && socket) {
@@ -328,31 +389,37 @@ const UnifiedDashboard = () => {
         
         {/* --- Welcome Section --- */}
         <div className="mb-8">
-          <h2 className="text-2xl font-bold text-slate-800">Welcome back, {user?.first_name}</h2>
-          <p className="text-slate-500 mt-1">
-            {isRecruiter 
-                ? "Here's what's happening with your job postings today." 
-                : "Explore new opportunities and connect with your community."}
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800">Welcome back, {user?.first_name}</h2>
+              <p className="text-slate-500 mt-1">
+                {isRecruiter 
+                    ? "Here's what's happening with your job postings today." 
+                    : "Explore new opportunities and connect with your community."}
+              </p>
+            </div>
+            {isRecruiter && (
+              <Button theme="blue" size="sm" onClick={() => setShowCreateJobModal(true)}>
+                Post New Job
+              </Button>
+            )}
+          </div>
         </div>
 
-        {/* --- Stats Grid (Role Based) --- */}
+        {/* --- Stats Grid (Role Based - Clickable Tabs) --- */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-            {isRecruiter ? (
-                <>
-                    <StatsCard title="Active Jobs" value={recruiterStats.activeJobs} icon={FiBriefcase} color="blue" trend="+2 this week" />
-                    <StatsCard title="Total Applicants" value={recruiterStats.totalApplicants} icon={FiUsers} color="indigo" trend="+12 this week" />
-                    <StatsCard title="Shortlisted" value={recruiterStats.shortlisted} icon={FiCheckCircle} color="emerald" trend="4 candidates" />
-                    <StatsCard title="Interviews" value={recruiterStats.interviews} icon={FiCalendar} color="purple" trend="2 scheduled" />
-                </>
-            ) : (
-                <>
-                    <StatsCard title="Jobs Applied" value={myApplications.length} icon={FiBriefcase} color="blue" />
-                    <StatsCard title="Interviews" value={myApplications.filter(a => a.status === 'interview').length} icon={FiUsers} color="indigo" />
-                    <StatsCard title="Profile Views" value={24} icon={FiEye} color="emerald" />
-                    <StatsCard title="Learning Hours" value={12} icon={FiBookOpen} color="purple" />
-                </>
-            )}
+            {tabs.map((tab) => (
+              <div key={tab.id} onClick={() => setActiveTab(activeTab === tab.id ? 'overview' : tab.id)} className="cursor-pointer">
+                 <StatsCard 
+                    title={tab.title} 
+                    value={tab.value} 
+                    icon={tab.icon} 
+                    color={tab.color} 
+                    trend={tab.trend} 
+                    isActive={activeTab === tab.id}
+                 />
+              </div>
+            ))}
         </div>
 
         {/* --- Main Content Grid --- */}
@@ -361,86 +428,238 @@ const UnifiedDashboard = () => {
           {/* LEFT/CENTER: Main Content (2 cols) */}
           <div className="lg:col-span-2 space-y-8">
             
-            {/* Recruiter: Job Table */}
+            {/* --- RECRUITER CONTENT --- */}
             {isRecruiter && (
-                <Card className="border-t-4 border-t-blue-500 overflow-hidden">
-                    <div className="flex items-center justify-between mb-6">
-                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <FiBriefcase className="text-blue-500" /> My Posted Jobs
-                        </h3>
-                        <Button variant="ghost" size="sm" onClick={() => navigate('/jobs/my-jobs')}>View All</Button>
-                    </div>
+                <>
+                    {/* Active Jobs Tab (Default) */}
+                    {(activeTab === 'overview' || activeTab === 'active_jobs') && (
+                        <Card className="border-t-4 border-t-blue-500 overflow-hidden">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <FiBriefcase className="text-blue-500" /> My Posted Jobs
+                                </h3>
+                                <Button variant="ghost" size="sm" onClick={() => navigate('/jobs/my-jobs')}>View All</Button>
+                            </div>
 
-                    {jobs.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="min-w-full divide-y divide-slate-200">
-                                <thead className="bg-slate-50">
-                                    <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Job Role</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Applicants</th>
-                                        <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="bg-white divide-y divide-slate-200">
-                                    {jobs.slice(0, 5).map((job) => (
-                                        <tr key={job.id} className="hover:bg-slate-50 transition-colors">
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="text-sm font-medium text-slate-900">{job.title}</div>
-                                                <div className="text-xs text-slate-500 flex items-center gap-1"><FiMapPin className="w-3 h-3"/> {job.location}</div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <Badge variant={job.status === 'active' || job.status === 'open' ? 'success' : 'neutral'}>{job.status}</Badge>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="font-bold text-slate-700">{job.applicants?.length || 0}</span>
-                                                    {(job.applicants?.length || 0) > 0 && (
-                                                        <span className="text-xs text-blue-600 cursor-pointer hover:underline" onClick={() => navigate(`/jobs/${job.id}/applications`)}>View</span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                                <div className="flex justify-end gap-2">
-                                                    <button onClick={() => navigate(`/jobs/${job.id}/applications`)} className="text-blue-600 p-1 hover:bg-blue-50 rounded" title="View Applications"><FiUsers /></button>
-                                                    <button onClick={() => handleEditJob(job)} className="text-slate-400 p-1 hover:bg-slate-100 rounded" title="Edit Job"><FiEdit2 /></button>
-                                                    <button onClick={() => handleCloseJob(job.id)} className="text-orange-400 p-1 hover:bg-orange-50 rounded" title="Close Job"><FiXCircle /></button>
-                                                    <button onClick={() => handleDeleteJob(job.id)} className="text-red-400 p-1 hover:bg-red-50 rounded" title="Delete Job"><FiTrash2 /></button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    ) : (
-                        <div className="text-center py-12 bg-slate-50 rounded-lg border border-dashed border-slate-300">
-                            <p className="text-slate-500 mb-4">No active jobs found</p>
-                            <Button theme="blue" size="sm" onClick={() => setShowCreateJobModal(true)}>Create Job</Button>
-                        </div>
+                            {jobs.length > 0 ? (
+                                <div className="overflow-x-auto">
+                                    <table className="min-w-full divide-y divide-slate-200">
+                                        <thead className="bg-slate-50">
+                                            <tr>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Job Role</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Status</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Applicants</th>
+                                                <th className="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="bg-white divide-y divide-slate-200">
+                                            {jobs.slice(0, 5).map((job) => (
+                                                <tr key={job.id} className="hover:bg-slate-50 transition-colors">
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="text-sm font-medium text-slate-900">{job.title}</div>
+                                                        <div className="text-xs text-slate-500 flex items-center gap-1"><FiMapPin className="w-3 h-3"/> {job.location}</div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <Badge variant={job.status === 'active' || job.status === 'open' ? 'success' : 'neutral'}>{job.status}</Badge>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-bold text-slate-700">{job.applicants?.length || 0}</span>
+                                                            {(job.applicants?.length || 0) > 0 && (
+                                                                <span className="text-xs text-blue-600 cursor-pointer hover:underline" onClick={() => navigate(`/jobs/${job.id}/applications`)}>View</span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                                        <div className="flex justify-end gap-2">
+                                                            <button onClick={() => navigate(`/jobs/${job.id}/applications`)} className="text-blue-600 p-1 hover:bg-blue-50 rounded" title="View Applications"><FiUsers /></button>
+                                                            <button onClick={() => handleEditJob(job)} className="text-slate-400 p-1 hover:bg-slate-100 rounded" title="Edit Job"><FiEdit2 /></button>
+                                                            <button onClick={() => handleCloseJob(job.id)} className="text-orange-400 p-1 hover:bg-orange-50 rounded" title="Close Job"><FiXCircle /></button>
+                                                            <button onClick={() => handleDeleteJob(job.id)} className="text-red-400 p-1 hover:bg-red-50 rounded" title="Delete Job"><FiTrash2 /></button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 bg-slate-50 rounded-lg border border-dashed border-slate-300">
+                                    <p className="text-slate-500 mb-4">No active jobs found</p>
+                                    <Button theme="blue" size="sm" onClick={() => setShowCreateJobModal(true)}>Create Job</Button>
+                                </div>
+                            )}
+                        </Card>
                     )}
-                </Card>
+
+                    {/* Applicants / Shortlisted / Interviews Tabs */}
+                    {(activeTab === 'applicants' || activeTab === 'shortlisted' || activeTab === 'interviews') && (
+                        <Card className="border-t-4 border-t-indigo-500">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <FiUsers className="text-indigo-500" />
+                                {activeTab === 'applicants' ? 'All Applicants' : 
+                                 activeTab === 'shortlisted' ? 'Shortlisted Candidates' : 'Scheduled Interviews'}
+                            </h3>
+                            <div className="space-y-3">
+                                {allApplications
+                                    .filter(app => {
+                                        if (activeTab === 'applicants') return true;
+                                        if (activeTab === 'shortlisted') return app.status === 'shortlisted';
+                                        if (activeTab === 'interviews') return app.status === 'interview';
+                                        return true;
+                                    })
+                                    .length > 0 ? (
+                                        allApplications
+                                        .filter(app => {
+                                            if (activeTab === 'applicants') return true;
+                                            if (activeTab === 'shortlisted') return app.status === 'shortlisted';
+                                            if (activeTab === 'interviews') return app.status === 'interview';
+                                            return true;
+                                        })
+                                        .map(app => (
+                                            <div key={app.id} className="p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors flex justify-between items-center">
+                                                <div>
+                                                    <h4 className="font-semibold text-slate-900">{app.candidate_name || 'Candidate'}</h4>
+                                                    <p className="text-sm text-slate-600">Applied for: <span className="font-medium text-blue-600">{app.jobTitle}</span></p>
+                                                    <p className="text-xs text-slate-500 mt-1">Status: {app.status}</p>
+                                                </div>
+                                                <Button size="sm" variant="outline" onClick={() => navigate(`/jobs/${app.job_id}/applications`)}>View Details</Button>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-center py-8 text-slate-500">
+                                            <p>No candidates found in this category.</p>
+                                        </div>
+                                    )
+                                }
+                            </div>
+                        </Card>
+                    )}
+                </>
             )}
 
-            {/* Student: Feed & Posts */}
+            {/* --- STUDENT / JOB SEEKER CONTENT --- */}
             {!isRecruiter && (
                 <>
-                    <PostComposer onSubmit={handleCreatePost} placeholder="Share with your network..." />
-                    
-                    <div className="space-y-4">
-                        <h3 className="text-lg font-bold text-slate-800">Community Feed</h3>
-                        {feedPosts.map((post) => (
-                            <FeedCard 
-                                key={post.id} 
-                                post={post}
-                                currentUserId={user?.id}
-                                onLike={handleLikePost}
-                                onComment={handleCommentPost}
-                                onShare={handleSharePost}
-                                className="mb-4"
-                            />
-                        ))}
-                    </div>
+                    {/* Default Overview (Feed) */}
+                    {activeTab === 'overview' && (
+                        <>
+                            <PostComposer onSubmit={handleCreatePost} placeholder="Share with your network..." />
+                            
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-bold text-slate-800">Community Feed</h3>
+                                {feedPosts.map((post) => (
+                                    <FeedCard 
+                                        key={post.id} 
+                                        post={post}
+                                        currentUserId={user?.id}
+                                        onLike={handleLikePost}
+                                        onComment={handleCommentPost}
+                                        onShare={handleSharePost}
+                                        onDelete={handleDeletePost}
+                                        className="mb-4"
+                                    />
+                                ))}
+                            </div>
+                        </>
+                    )}
+
+                    {/* Applications Tab */}
+                    {(activeTab === 'applied' || activeTab === 'interviews') && (
+                        <Card className="border-t-4 border-t-blue-500">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <FiBriefcase className="text-blue-500" />
+                                {activeTab === 'applied' ? 'My Applications' : 'Upcoming Interviews'}
+                            </h3>
+                            <div className="space-y-3">
+                                {myApplications
+                                    .filter(app => activeTab === 'interviews' ? app.status === 'interview' : true)
+                                    .length > 0 ? (
+                                    myApplications
+                                        .filter(app => activeTab === 'interviews' ? app.status === 'interview' : true)
+                                        .map((app) => (
+                                        <div key={app.id} className="p-4 border border-slate-100 rounded-lg hover:border-blue-200 transition-all">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h4 className="font-bold text-slate-900">{app.job?.title || 'Job Role'}</h4>
+                                                    <p className="text-sm text-slate-600">{app.job?.company_name || 'Company Name'}</p>
+                                                </div>
+                                                <Badge variant={app.status === 'submitted' ? 'secondary' : app.status === 'shortlisted' ? 'success' : app.status === 'interview' ? 'success' : app.status === 'rejected' ? 'danger' : 'neutral'}>
+                                                    {app.status}
+                                                </Badge>
+                                            </div>
+                                            <div className="mt-3 flex items-center justify-between">
+                                                <div className="text-xs text-slate-500 flex items-center gap-2">
+                                                    <FiClock /> Applied {formatDistanceToNow(new Date(app.applied_at || Date.now()), { addSuffix: true })}
+                                                </div>
+                                                <Button size="sm" variant="ghost" onClick={() => navigate(`/jobs/${app.job?.id}`)}>View Job</Button>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div className="text-center py-8 text-slate-500 bg-slate-50 rounded-lg">
+                                        <p>No applications found.</p>
+                                        <Button size="sm" theme="blue" className="mt-2" onClick={() => navigate('/jobs')}>Find Jobs</Button>
+                                    </div>
+                                )}
+                            </div>
+                        </Card>
+                    )}
+
+                    {/* Learning Tab */}
+                    {activeTab === 'learning' && (
+                        <Card className="border-t-4 border-t-purple-500">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <FiBookOpen className="text-purple-500" /> Learning Progress
+                            </h3>
+                            <div className="space-y-6">
+                                {learningResources.map((res) => (
+                                    <div key={res.id} className="bg-slate-50 p-4 rounded-lg">
+                                        <div className="flex justify-between text-sm mb-2">
+                                            <span className="font-bold text-slate-700">{res.title}</span>
+                                            <span className="font-bold text-blue-600">{res.progress}%</span>
+                                        </div>
+                                        <ProgressBar value={res.progress} color="blue" showLabel={false} className="h-2" />
+                                        <div className="mt-2 flex justify-end">
+                                            <Button size="sm" variant="outline">Continue Learning</Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                    )}
+
+                    {/* Professional Analytics Tabs */}
+                    {(activeTab === 'impressions' || activeTab === 'connections' || activeTab === 'search_appearances') && (
+                         <Card className="border-t-4 border-t-indigo-500">
+                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                 <FiTrendingUp className="text-indigo-500" /> Analytics
+                             </h3>
+                             <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-lg">
+                                 <FiTrendingUp className="w-12 h-12 mx-auto mb-3 text-indigo-200" />
+                                 <h4 className="font-semibold text-slate-700">
+                                    {activeTab === 'impressions' ? 'Post Impressions' : 
+                                     activeTab === 'connections' ? 'Connections Growth' : 'Search Appearances'}
+                                 </h4>
+                                 <p className="text-sm mt-1">Detailed analytics and charts coming soon.</p>
+                                 <Button size="sm" variant="outline" className="mt-4" onClick={() => setActiveTab('overview')}>Back to Feed</Button>
+                             </div>
+                         </Card>
+                    )}
+
+                    {/* Profile Views Tab */}
+                    {activeTab === 'profile_views' && (
+                        <Card className="border-t-4 border-t-emerald-500">
+                             <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <FiEye className="text-emerald-500" /> Profile Analytics
+                             </h3>
+                             <div className="text-center py-12 text-slate-500 bg-slate-50 rounded-lg">
+                                 <FiTrendingUp className="w-12 h-12 mx-auto mb-3 text-emerald-200" />
+                                 <h4 className="font-semibold text-slate-700">Analytics Dashboard</h4>
+                                 <p className="text-sm mt-1">Detailed profile insights and visitor stats coming soon.</p>
+                             </div>
+                        </Card>
+                    )}
                 </>
             )}
           </div>
@@ -491,10 +710,36 @@ const UnifiedDashboard = () => {
                         </div>
                     </Card>
 
+                    <Card>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-semibold text-slate-900">Recommended Friends</h3>
+                        <a href="#" className="text-sm text-blue-600 hover:underline" onClick={(e) => { e.preventDefault(); navigate('/connections'); }}>View All</a>
+                      </div>
+                      <div className="space-y-3">
+                        {(suggestions || []).slice(0, 5).map((u) => (
+                          <div key={u.id} className="flex items-center justify-between p-3 border border-slate-100 rounded-lg">
+                            <div className="flex items-center gap-3">
+                              <img src={u.profile_picture || `https://ui-avatars.com/api/?name=${encodeURIComponent((u.first_name||'') + ' ' + (u.last_name||''))}&background=random`} alt="" className="w-10 h-10 rounded-full object-cover" />
+                              <div>
+                                <div className="text-sm font-semibold text-slate-900">{`${u.first_name || ''} ${u.last_name || ''}`.trim() || u.user_name || 'User'}</div>
+                                <div className="text-xs text-slate-500">{u.headline || 'Connect and grow your network'}</div>
+                              </div>
+                            </div>
+                            <Button size="sm" theme="blue" disabled={u.requested} onClick={() => handleConnectSuggestion(u.id)}>
+                              {u.requested ? 'Requested' : 'Connect'}
+                            </Button>
+                          </div>
+                        ))}
+                        {(!suggestions || suggestions.length === 0) && (
+                          <p className="text-sm text-slate-500">No suggestions right now.</p>
+                        )}
+                      </div>
+                    </Card>
+
                     {/* Submitted Applications with real-time status */}
                     <Card>
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold text-slate-900">Submitted Applications</h3>
+                        <h3 className="font-semibold text-white">Submitted Applications</h3>
                         <button className="text-sm text-blue-600 hover:underline" onClick={() => navigate('/applications')}>View All</button>
                       </div>
                       <div className="space-y-3">
@@ -601,7 +846,7 @@ const UnifiedDashboard = () => {
 };
 
 // Helper Component for Stats
-const StatsCard = ({ title, value, icon: Icon, color, trend }) => {
+const StatsCard = ({ title, value, icon: Icon, color, trend, isActive }) => {
   const colorClasses = {
     blue: 'bg-blue-100 text-blue-600',
     indigo: 'bg-indigo-100 text-indigo-600',
@@ -610,13 +855,17 @@ const StatsCard = ({ title, value, icon: Icon, color, trend }) => {
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+    <div className={`bg-white p-6 rounded-xl border transition-all duration-200 ${
+        isActive 
+          ? 'border-blue-500 shadow-lg ring-2 ring-blue-500/20 bg-blue-50/50' 
+          : 'border-slate-200 shadow-sm hover:shadow-md hover:border-blue-300'
+    }`}>
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
-          <h3 className="text-2xl font-bold text-slate-800">{value}</h3>
+          <p className={`text-sm font-medium mb-1 ${isActive ? 'text-blue-700' : 'text-slate-500'}`}>{title}</p>
+          <h3 className={`text-2xl font-bold ${isActive ? 'text-blue-900' : 'text-slate-800'}`}>{value}</h3>
         </div>
-        <div className={`p-3 rounded-lg ${colorClasses[color] || 'bg-slate-100 text-slate-600'}`}>
+        <div className={`p-3 rounded-lg ${colorClasses[color] || 'bg-slate-100 text-slate-600'} ${isActive ? 'shadow-sm' : ''}`}>
           <Icon className="w-5 h-5" />
         </div>
       </div>

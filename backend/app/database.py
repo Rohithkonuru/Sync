@@ -17,12 +17,12 @@ async def connect_to_mongo():
         # Test connection
         await database.client.admin.command('ping')
         logger.info("Connected to MongoDB")
-        print("✅ Connected to MongoDB successfully")
+        print("Connected to MongoDB successfully")
     except Exception as e:
         logger.error(f"Error connecting to MongoDB: {e}")
-        print(f"⚠️  MongoDB connection failed: {e}")
-        print("⚠️  The server will start but database operations will fail.")
-        print("⚠️  Please ensure MongoDB is running or update MONGODB_URI in .env")
+        print(f"WARNING: MongoDB connection failed: {e}")
+        print("WARNING: The server will start but database operations will fail.")
+        print("WARNING: Please ensure MongoDB is running or update MONGODB_URI in .env")
         database.client = None
 
 async def close_mongo_connection():
@@ -40,4 +40,20 @@ def get_database():
         )
     db_name = settings.mongodb_uri.split("/")[-1].split("?")[0]
     return database.client[db_name]
+
+# New collections
+def get_jobs_collection():
+    return get_database().jobs
+
+def get_applications_collection():
+    return get_database().job_applications
+
+def get_connections_collection():
+    return get_database().connections
+
+def get_messages_collection():
+    return get_database().messages
+
+def get_notifications_collection():
+    return get_database().notifications
 

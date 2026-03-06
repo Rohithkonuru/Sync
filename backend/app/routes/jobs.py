@@ -12,6 +12,7 @@ from app.middleware.auth_middleware import get_current_user
 from app.database import get_database
 from app.services.notifications import create_notification
 from app.services.socket_manager import send_notification
+from app.services.sync_score import SyncScoreService
 from app.services.auth import get_user_by_id
 
 router = APIRouter()
@@ -61,6 +62,14 @@ async def create_job(
 
     return job_to_dict(job_dict)
 
+# Alias without trailing slash to avoid method mismatch issues
+@router.post("", response_model=JobResponse)
+async def create_job_alias(
+    job_data: JobCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    return await create_job(job_data, current_user)
+
 @router.get("/", response_model=List[JobResponse])
 async def get_jobs(
     skip: int = Query(0, ge=0),
@@ -104,6 +113,22 @@ async def get_jobs(
     jobs = await jobs_cursor.to_list(length=limit)
 
     return [job_to_dict(job) for job in jobs]
+
+# Alias without trailing slash
+@router.get("", response_model=List[JobResponse])
+async def get_jobs_alias(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    title: Optional[str] = Query(None),
+    location: Optional[str] = Query(None),
+    job_type: Optional[str] = Query(None),
+    experience_level: Optional[str] = Query(None),
+    salary_min: Optional[int] = Query(None, ge=0),
+    salary_max: Optional[int] = Query(None, ge=0),
+    skills: Optional[str] = Query(None),
+    company: Optional[str] = Query(None)
+):
+    return await get_jobs(skip, limit, title, location, job_type, experience_level, salary_min, salary_max, skills, company)
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str):
@@ -227,6 +252,13 @@ async def apply_for_job(
             detail="Job not found"
         )
 
+    # Prevent applying to own job
+    if str(job.get("posted_by")) == str(current_user["_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Recruiters cannot apply to their own jobs"
+        )
+
     # Check if job is active/open
     if job.get("status") not in ["active", "open"]:
         raise HTTPException(
@@ -348,6 +380,7 @@ async def apply_for_job(
     application_dict = {
         "job_id": job_id,
         "applicant_id": str(current_user["_id"]),
+        "recruiter_id": str(job["posted_by"]),  # Add recruiter_id for security
         "full_name": full_name,
         "email": email,
         "contact_number": contact_number or contact_phone,
@@ -363,6 +396,8 @@ async def apply_for_job(
         "applied_at": datetime.utcnow(),
         "status": "submitted",
         "updated_at": datetime.utcnow(),
+        "is_seen": False,  # Add seen status
+        "seen_at": None,   # Add seen timestamp
         "status_history": [{
             "status": "submitted",
             "updated_at": datetime.utcnow(),
@@ -391,6 +426,13 @@ async def apply_for_job(
     
     # Send real-time notification via WebSocket
     await send_notification(str(job["posted_by"]), notification_data)
+
+    # Record sync score activity for job application
+    try:
+        sync_score_service = SyncScoreService()
+        await sync_score_service.record_activity(str(current_user["_id"]), "job_application")
+    except Exception as e:
+        print(f"Warning: Failed to record job application activity: {str(e)}")
 
     return {"message": "Application submitted successfully", "application_id": str(result.inserted_id)}
 
@@ -446,8 +488,74 @@ async def get_recruiter_job_applications(
     job_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Alias endpoint for /api/jobs/{job_id}/applications - returns applications for recruiter-owned job"""
-    return await get_job_applications(job_id, current_user)
+    """Get applications for a specific job (recruiter only)"""
+    # Validate user is recruiter
+    if current_user.get("user_type") != "recruiter":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only recruiters can view job applications"
+        )
+    
+    if not ObjectId.is_valid(job_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid job ID format"
+        )
+
+    db = get_database()
+    job = await db.jobs.find_one({"_id": ObjectId(job_id)})
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+
+    # Validate recruiter owns the job
+    if str(job["posted_by"]) != str(current_user["_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only view applications for your own jobs"
+        )
+
+    # Fetch applications with candidate details
+    applications = await db.job_applications.find({"job_id": job_id}).sort("applied_at", -1).to_list(length=None)
+
+    # Enrich with candidate data and calculate scores
+    enriched_applications = []
+    for app in applications:
+        applicant = await db.users.find_one({"_id": ObjectId(app["applicant_id"])})
+        if applicant:
+            # Calculate sync score (placeholder - implement actual scoring logic)
+            sync_score = 75  # Default score
+            
+            # Calculate ATS score based on profile completeness
+            ats_score = 0
+            if applicant.get("headline"):
+                ats_score += 20
+            if applicant.get("experience"):
+                ats_score += 30
+            if applicant.get("skills"):
+                ats_score += 25
+            if applicant.get("education"):
+                ats_score += 25
+
+            enriched_app = {
+                "candidate_id": str(applicant["_id"]),
+                "name": f"{applicant.get('first_name', '')} {applicant.get('last_name', '')}".strip(),
+                "sync_score": sync_score,
+                "ats_score": ats_score,
+                "status": app.get("status", "submitted"),
+                "is_seen": app.get("is_seen", False),
+                "applied_at": app.get("applied_at"),
+                "application_id": str(app["_id"]),
+                "email": applicant.get("email"),
+                "headline": applicant.get("headline"),
+                "location": applicant.get("location"),
+                "profile_picture": applicant.get("profile_picture")
+            }
+            enriched_applications.append(enriched_app)
+
+    return enriched_applications
 
 @router.get("/my-applications/list", response_model=List[JobApplicationResponse])
 async def get_my_applications(
@@ -596,6 +704,67 @@ async def get_application_history(
         enriched_history.append(enriched_entry)
     
     return {"history": enriched_history}
+
+@router.put("/applications/{application_id}/seen")
+async def mark_application_as_seen(
+    application_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark application as seen (recruiter only)"""
+    if not ObjectId.is_valid(application_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid application ID format"
+        )
+
+    db = get_database()
+    application = await db.job_applications.find_one({"_id": ObjectId(application_id)})
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Application not found"
+        )
+
+    job = await db.jobs.find_one({"_id": ObjectId(application["job_id"])})
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found"
+        )
+
+    # Only job poster can mark as seen
+    if str(job["posted_by"]) != str(current_user["_id"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the job poster can mark application as seen"
+        )
+
+    # Update application if not already seen
+    if not application.get("is_seen", False):
+        # Add to status history if status is still "submitted"
+        status_history = application.get("status_history", [])
+        if application.get("status") == "submitted":
+            status_history.append({
+                "status": "seen",
+                "updated_at": datetime.utcnow(),
+                "updated_by": str(current_user["_id"]),
+                "note": "Application viewed by recruiter"
+            })
+
+        await db.job_applications.update_one(
+            {"_id": ObjectId(application_id)},
+            {
+                "$set": {
+                    "is_seen": True,
+                    "seen_at": datetime.utcnow(),
+                    "status": "seen" if application.get("status") == "submitted" else application.get("status"),
+                    "updated_at": datetime.utcnow(),
+                    "status_history": status_history
+                }
+            }
+        )
+
+    return {"message": "Application marked as seen"}
 
 @router.put("/applications/{application_id}/status")
 async def update_application_status(

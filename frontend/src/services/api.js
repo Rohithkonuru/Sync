@@ -27,9 +27,19 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    console.error('API Error:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message,
+    });
+    
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
-      window.location.href = '/login';
+      localStorage.removeItem('user');
+      // Only redirect if not on login page and actually authenticated before
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
     }
     return Promise.reject(error);
   }
@@ -38,7 +48,7 @@ api.interceptors.response.use(
 export const authService = {
   login: (email, password) => api.post('/api/auth/login', { email, password }),
   register: (userData) => {
-    // If FormData, send with multipart headers
+    // If FormData, send with multipart headers to full register endpoint
     if (userData instanceof FormData) {
       return api.post('/api/auth/register', userData, {
         headers: {
@@ -46,7 +56,8 @@ export const authService = {
         },
       });
     }
-    return api.post('/api/auth/register', userData);
+    // For simple registration, use simple endpoint
+    return api.post('/api/auth/register/simple', userData);
   },
   getCurrentUser: () => api.get('/api/auth/me'),
   refreshToken: () => api.post('/api/auth/refresh'),
@@ -156,8 +167,10 @@ export const jobService = {
   getApplicationHistory: (applicationId) => api.get(`/api/jobs/applications/${applicationId}/history`),
   getApplications: (params) => api.get('/api/jobs/my-applications/list', { params }),
   getJobApplications: (jobId) => api.get(`/api/jobs/${jobId}/applications`),
+  getRecruiterJobApplications: (jobId) => api.get(`/api/jobs/recruiter/jobs/${jobId}/applications`),
   getMyJobs: () => api.get('/api/jobs/my-jobs/list'),
   updateApplicationStatus: (applicationId, status, note) => api.put(`/api/jobs/applications/${applicationId}/status`, { status, note }),
+  markApplicationAsSeen: (applicationId) => api.put(`/api/jobs/applications/${applicationId}/seen`),
   deleteApplication: (applicationId) => api.delete(`/api/jobs/applications/${applicationId}`),
   downloadResume: (applicationId) => api.get(`/api/jobs/applications/${applicationId}/resume`, { responseType: 'blob' }),
   saveJob: (jobId) => api.post(`/api/jobs/${jobId}/save`),
@@ -202,6 +215,33 @@ export const notificationService = {
   markAllRead: () => api.put('/api/notifications/read-all'),
   deleteNotification: (notificationId) => api.delete(`/api/notifications/${notificationId}`),
 };
+
+export const growthScoreService = {
+  getMyGrowthScore: () => api.get('/api/users/me/growth-score'),
+  getUserGrowthScore: (userId) => api.get(`/api/users/${userId}/growth-score`),
+  updateGrowthScore: () => api.post('/api/users/growth-score/update'),
+  recordActivity: (activityType) => api.post(`/api/users/activity/${activityType}`),
+};
+
+export const analyticsService = {
+  getGenderDemographics: (jobId) => api.get('/api/analytics/gender-demographics', { params: { job_id: jobId } }),
+  getApplicationsOverTime: (jobId, days = 30) => api.get('/api/analytics/applications-over-time', { params: { job_id: jobId, days } }),
+  getApplicationStatusBreakdown: (jobId) => api.get('/api/analytics/status-breakdown', { params: { job_id: jobId } }),
+  getSyncScoreDistribution: (jobId) => api.get('/api/analytics/sync-score-distribution', { params: { job_id: jobId } }),
+  getAtsScoreAverages: (jobId) => api.get('/api/analytics/ats-score-averages', { params: { job_id: jobId } }),
+  getRecruiterAnalyticsOverview: () => api.get('/api/analytics/overview'),
+};
+
+// Extend userService with Growth Score methods
+userService.getGrowthScore = (userId) => {
+  if (userId === 'me' || !userId) {
+    return growthScoreService.getMyGrowthScore();
+  }
+  return growthScoreService.getUserGrowthScore(userId);
+};
+
+userService.updateGrowthScore = () => growthScoreService.updateGrowthScore();
+userService.recordActivity = (activityType) => growthScoreService.recordActivity(activityType);
 
 export default api;
 
