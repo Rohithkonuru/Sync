@@ -9,6 +9,54 @@ const api = axios.create({
   },
 });
 
+const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
+
+const toAbsoluteMediaUrl = (value) => {
+  if (typeof value !== 'string') return value;
+  if (!value.trim()) return value;
+  if (ABSOLUTE_URL_PATTERN.test(value) || value.startsWith('data:') || value.startsWith('blob:')) {
+    return value;
+  }
+  if (value.startsWith('/uploads/')) {
+    return `${API_URL}${value}`;
+  }
+  return value;
+};
+
+const normalizeMediaUrls = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload.map(normalizeMediaUrls);
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  const mediaKeys = new Set([
+    'profile_picture',
+    'banner_picture',
+    'user_picture',
+    'media_url',
+    'resume_url',
+    'resume_file_url',
+    'url',
+  ]);
+
+  const normalized = { ...payload };
+  Object.keys(normalized).forEach((key) => {
+    const value = normalized[key];
+    if (mediaKeys.has(key)) {
+      normalized[key] = toAbsoluteMediaUrl(value);
+      return;
+    }
+    if (typeof value === 'object' && value !== null) {
+      normalized[key] = normalizeMediaUrls(value);
+    }
+  });
+
+  return normalized;
+};
+
 // Request interceptor to add token
 api.interceptors.request.use(
   (config) => {
@@ -25,7 +73,7 @@ api.interceptors.request.use(
 
 // Response interceptor to handle errors
 api.interceptors.response.use(
-  (response) => response.data,
+  (response) => normalizeMediaUrls(response.data),
   (error) => {
     console.error('API Error:', {
       status: error.response?.status,
@@ -113,12 +161,32 @@ export const userService = {
       'Content-Type': 'multipart/form-data',
     },
   }),
+  uploadResumeLegacy: (formData) => api.post('/api/users/upload-resume', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
 };
 
 export const postService = {
   createPost: (data) => api.post('/api/posts', data),
-  getPosts: (params) => api.get('/api/posts', { params }),
-  getFeed: (params) => api.get('/api/posts/feed', { params }),
+  createPostV2: (data) => api.post('/api/posts/create', data),
+  getPosts: (params = {}) => {
+    const { signal, ...rest } = params;
+    return api.get('/api/posts', { params: rest, signal });
+  },
+  getFeed: (params = {}) => {
+    const { signal, ...rest } = params;
+    return api.get('/api/posts/feed', { params: rest, signal });
+  },
+  getNetworkFeed: (userId, params = {}) => {
+    const { signal, ...rest } = params;
+    return api.get(`/api/posts/network/${userId}`, { params: rest, signal });
+  },
+  getSavedPostsByUser: (userId, params = {}) => {
+    const { signal, ...rest } = params;
+    return api.get(`/api/posts/saved/${userId}`, { params: rest, signal });
+  },
   getPost: (postId) => api.get(`/api/posts/${postId}`),
   likePost: (postId) => api.post(`/api/posts/${postId}/like`),
   commentPost: (postId, content) => api.post(`/api/posts/${postId}/comment?content=${encodeURIComponent(content)}`),
@@ -135,6 +203,14 @@ export const postService = {
       },
     });
   },
+};
+
+export const certificationService = {
+  uploadCertificate: (formData) => api.post('/api/certifications/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
 };
 
 export const jobService = {
@@ -223,6 +299,19 @@ export const growthScoreService = {
   recordActivity: (activityType) => api.post(`/api/users/activity/${activityType}`),
 };
 
+export const eventService = {
+  createEvent: (payload) => api.post('/api/events/create', payload),
+};
+
+export const subscriptionService = {
+  startTrial: () => api.post('/api/subscriptions/start-trial'),
+};
+
+export const interviewService = {
+  acceptInvite: (interviewId) => api.post(`/api/interviews/${interviewId}/accept`),
+  declineInvite: (interviewId) => api.post(`/api/interviews/${interviewId}/decline`),
+};
+
 export const analyticsService = {
   getGenderDemographics: (jobId) => api.get('/api/analytics/gender-demographics', { params: { job_id: jobId } }),
   getApplicationsOverTime: (jobId, days = 30) => api.get('/api/analytics/applications-over-time', { params: { job_id: jobId, days } }),
@@ -230,6 +319,8 @@ export const analyticsService = {
   getSyncScoreDistribution: (jobId) => api.get('/api/analytics/sync-score-distribution', { params: { job_id: jobId } }),
   getAtsScoreAverages: (jobId) => api.get('/api/analytics/ats-score-averages', { params: { job_id: jobId } }),
   getRecruiterAnalyticsOverview: () => api.get('/api/analytics/overview'),
+  getUserSyncScore: (userId) => api.get(`/api/analytics/sync-score/${userId}`),
+  getUserGrowthScore: (userId) => api.get(`/api/analytics/growth-score/${userId}`),
 };
 
 // Extend userService with Growth Score methods
@@ -237,7 +328,7 @@ userService.getGrowthScore = (userId) => {
   if (userId === 'me' || !userId) {
     return growthScoreService.getMyGrowthScore();
   }
-  return growthScoreService.getUserGrowthScore(userId);
+  return analyticsService.getUserGrowthScore(userId);
 };
 
 userService.updateGrowthScore = () => growthScoreService.updateGrowthScore();

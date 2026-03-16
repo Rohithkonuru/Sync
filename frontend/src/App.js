@@ -11,15 +11,18 @@ import Communities from './pages/Communities';
 import MyConnections from './pages/MyConnections';
 import Settings from './pages/Settings';
 import JobApplications from './pages/JobApplications';
-import RecruiterJobApplications from './pages/RecruiterJobApplications';
 import RecruiterJobApplicationsEnhanced from './pages/RecruiterJobApplicationsEnhanced';
 import RecruiterJobApplicants from './pages/RecruiterJobApplicants';
 import JobCreate from './pages/JobCreate';
 import MyApplications from './pages/MyApplications';
+import SavedPostsPage from './pages/SavedPostsPage';
+import ArticleCreatePage from './pages/ArticleCreatePage';
+import ProfileViewsPage from './pages/ProfileViewsPage';
 import Navbar from './components/Navbar';
 import PrivateRoute from './components/PrivateRoute';
 import { AuthProvider } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
+import { FeedProvider } from './context/FeedContext';
 import './App.css';
 
 // Error Boundary Component
@@ -72,8 +75,9 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <SocketProvider>
-          <Router>
-            <div className="App min-h-screen bg-gray-50 overflow-x-hidden">
+          <FeedProvider>
+            <Router>
+              <div className="App min-h-screen bg-gray-50 overflow-x-hidden">
               <Toaster
                 position="top-right"
                 toastOptions={{
@@ -122,6 +126,10 @@ function App() {
                         <Route path="/companies" element={<Companies />} />
                         <Route path="/communities" element={<Communities />} />
                         <Route path="/connections" element={<MyConnections />} />
+                        <Route path="/network" element={<MyConnections />} />
+                        <Route path="/saved" element={<SavedPostsPage />} />
+                        <Route path="/articles/create" element={<ArticleCreatePage />} />
+                        <Route path="/analytics/profile-views" element={<ProfileViewsPage />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="*" element={<Navigate to="/home" replace />} />
                       </Routes>
@@ -129,8 +137,9 @@ function App() {
                   }
                 />
               </Routes>
-            </div>
-          </Router>
+              </div>
+            </Router>
+          </FeedProvider>
         </SocketProvider>
       </AuthProvider>
     </ErrorBoundary>

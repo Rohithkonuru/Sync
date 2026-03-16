@@ -119,6 +119,10 @@ class UserResponse(BaseModel):
     ats_score_updated: Optional[datetime] = None
     sync_score: int = 0
     sync_score_updated: Optional[datetime] = None
+    profile_completion: Optional[float] = None
+    last_activity: Optional[datetime] = None
+    previous_sync_score: Optional[int] = None
+    previous_ats_score: Optional[float] = None
     growth_score: int = 0
     growth_score_updated: Optional[datetime] = None
     gender: Optional[str] = None  # Only visible to recruiters in analytics

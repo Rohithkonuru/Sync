@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FiTrendingUp, FiInfo } from 'react-icons/fi';
-import { userService } from '../services/api';
+import { analyticsService } from '../services/api';
 
 /**
  * Growth Score Component
@@ -22,25 +22,21 @@ const GrowthScore = ({
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  useEffect(() => {
-    fetchGrowthScore();
-  }, [userId]);
-
-  const fetchGrowthScore = async () => {
+  const fetchGrowthScore = useCallback(async () => {
     if (!userId) return;
     
     try {
       setLoading(true);
       setError(null);
       
-      const response = await userService.getGrowthScore(userId);
+      const response = await analyticsService.getUserGrowthScore(userId);
       
-      if (response.success !== false) {
-        setGrowthScore(response.growth_score || 0);
+      if (response && response.growth_score !== null && response.growth_score !== undefined) {
+        setGrowthScore(response.growth_score);
         setLastUpdated(response.growth_score_updated);
         
         if (onScoreUpdate) {
-          onScoreUpdate(response.growth_score || 0);
+          onScoreUpdate(response.growth_score);
         }
       } else {
         setError(response.message || 'Failed to fetch Growth Score');
@@ -51,7 +47,11 @@ const GrowthScore = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId, onScoreUpdate]);
+
+  useEffect(() => {
+    fetchGrowthScore();
+  }, [fetchGrowthScore]);
 
   const getScoreColor = (score) => {
     if (score >= 80) return 'text-green-600';

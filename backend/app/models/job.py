@@ -103,6 +103,9 @@ class JobApplicationCreate(BaseModel):
 class JobApplicationResponse(BaseModel):
     id: str
     job_id: str
+    job: Optional[dict] = None
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
     applicant_id: str
     applicant: Optional[dict] = None
     full_name: Optional[str] = None

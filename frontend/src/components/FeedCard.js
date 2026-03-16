@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiHeart, FiMessageCircle, FiShare2, FiBookmark, FiMoreVertical, FiUser, FiTrash2, FiSend } from 'react-icons/fi';
+import { FiHeart, FiMessageCircle, FiShare2, FiBookmark, FiMoreVertical, FiTrash2, FiSend } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { postService } from '../services/api';
 
@@ -10,6 +10,22 @@ const FeedCard = ({
   currentUserId,
   onPostUpdate
 }) => {
+  const normalizePost = (postData, fallbackPost = {}) => ({
+    ...fallbackPost,
+    ...postData,
+    id: postData?.id || fallbackPost?.id || postData?._id || fallbackPost?._id,
+    _id: postData?._id || fallbackPost?._id || postData?.id || fallbackPost?.id,
+    likes: postData?.likes || fallbackPost?.likes || [],
+    comments: postData?.comments || fallbackPost?.comments || [],
+    shares: postData?.shares ?? fallbackPost?.shares ?? 0,
+    images: postData?.images || fallbackPost?.images || [],
+    media_url: postData?.media_url || fallbackPost?.media_url,
+    media_type: postData?.media_type || fallbackPost?.media_type,
+    user_name: postData?.user_name || fallbackPost?.user_name,
+    user_picture: postData?.user_picture || fallbackPost?.user_picture,
+    created_at: postData?.created_at || fallbackPost?.created_at,
+  });
+
   const [post, setPost] = useState(initialPost);
   const [isLiked, setIsLiked] = useState(initialPost.likes?.includes(currentUserId) || false);
   const [likeCount, setLikeCount] = useState(initialPost.likes?.length || 0);
@@ -21,12 +37,14 @@ const FeedCard = ({
   const [comments, setComments] = useState(initialPost.comments || []);
   const [likeAnimating, setLikeAnimating] = useState(false);
   const [sharePressed, setSharePressed] = useState(false);
+  const postId = post?.id || post?._id;
 
   useEffect(() => {
-    setPost(initialPost);
-    setLikeCount(initialPost.likes?.length || 0);
-    setComments(initialPost.comments || []);
-    setIsLiked(initialPost.likes?.includes(currentUserId) || false);
+    const nextPost = normalizePost(initialPost, post);
+    setPost(nextPost);
+    setLikeCount(nextPost.likes?.length || 0);
+    setComments(nextPost.comments || []);
+    setIsLiked(nextPost.likes?.includes(currentUserId) || false);
   }, [initialPost, currentUserId]);
 
   const resolveImageUrl = (url) => {
@@ -39,13 +57,18 @@ const FeedCard = ({
   };
 
   const handleLike = async () => {
+    if (!postId) {
+      toast.error('Post is unavailable');
+      return;
+    }
+
     try {
       setLikeAnimating(true);
       setIsLiked(!isLiked);
       const newCount = isLiked ? likeCount - 1 : likeCount + 1;
       setLikeCount(newCount);
       
-      const updatedPost = await postService.likePost(post.id);
+      const updatedPost = normalizePost(await postService.likePost(postId), post);
       setPost(updatedPost);
       setLikeCount(updatedPost.likes?.length || 0);
       setIsLiked(updatedPost.likes?.includes(currentUserId) || false);
@@ -63,10 +86,14 @@ const FeedCard = ({
   const handleCommentSubmit = async (e) => {
     e.preventDefault();
     if (!commentText.trim()) return;
+    if (!postId) {
+      toast.error('Post is unavailable');
+      return;
+    }
 
     setIsSubmittingComment(true);
     try {
-      const updatedPost = await postService.commentPost(post.id, commentText);
+      const updatedPost = normalizePost(await postService.commentPost(postId, commentText), post);
       setPost(updatedPost);
       setComments(updatedPost.comments || []);
       setCommentText('');
@@ -80,11 +107,18 @@ const FeedCard = ({
   };
 
   const handleShare = async () => {
+    if (!postId) {
+      toast.error('Post is unavailable');
+      return;
+    }
+
     try {
       setSharePressed(true);
-      const updatedPost = await postService.sharePost(post.id);
+      const postUrl = `${window.location.origin}/posts/${postId}`;
+      await navigator.clipboard.writeText(postUrl);
+      const updatedPost = normalizePost(await postService.sharePost(postId), post);
       setPost(updatedPost);
-      toast.success('Post shared!');
+      toast.success('Post link copied and shared!');
       setTimeout(() => setSharePressed(false), 300);
     } catch (error) {
       setSharePressed(false);
@@ -94,7 +128,7 @@ const FeedCard = ({
 
   const handleSave = async () => {
     try {
-      await postService.savePost(post.id);
+      await postService.savePost(postId);
       setIsSaved(!isSaved);
       toast.success(isSaved ? 'Post unsaved' : 'Post saved');
     } catch (error) {
@@ -106,25 +140,13 @@ const FeedCard = ({
     if (!window.confirm('Are you sure you want to delete this post?')) return;
 
     try {
-      const postId = post.id || post._id;
-      console.log('🗑️ Deleting post:', postId);
-      console.log('📋 Current user ID:', currentUserId);
-      console.log('👤 Post creator ID:', post.user_id);
-      console.log('✅ Is owner:', String(currentUserId) === String(post.user_id));
-      
-      const response = await postService.deletePost(postId);
-      console.log('✅ Delete response:', response);
+      await postService.deletePost(postId);
       
       toast.success('Post deleted successfully');
       if (onPostUpdate) {
         onPostUpdate(postId);
       }
     } catch (error) {
-      console.error('❌ Delete error:', error);
-      console.error('Error response:', error.response);
-      console.error('Error status:', error.response?.status);
-      console.error('Error data:', error.response?.data);
-      
       if (error.response?.status === 403) {
         toast.error('You can only delete your own posts');
       } else if (error.response?.data?.detail) {
@@ -205,8 +227,32 @@ const FeedCard = ({
       {/* Content */}
       <div className="p-4">
         <p className="text-neutral-900 whitespace-pre-wrap break-words mb-4 leading-relaxed text-sm sm:text-base">{post.content}</p>
-        
-        {post.images && post.images.length > 0 && (
+        {post.media_url && post.media_type === 'image' && (
+          <div className="mb-4">
+            <motion.img
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              src={resolveImageUrl(post.media_url)}
+              alt="Post media"
+              className="w-full h-48 object-cover rounded-lg"
+            />
+          </div>
+        )}
+
+        {post.media_url && post.media_type === 'video' && (
+          <div className="mb-4">
+            <motion.video
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              controls
+              className="w-full rounded-lg"
+            >
+              <source src={resolveImageUrl(post.media_url)} />
+            </motion.video>
+          </div>
+        )}
+
+        {!post.media_url && post.images && post.images.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
             <AnimatePresence>
               {post.images.slice(0, 4).map((image, idx) => (
@@ -254,10 +300,10 @@ const FeedCard = ({
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={handleLike}
-            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-lg transition-all font-medium text-xs sm:text-sm ${
+            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-xl border transition-all font-medium text-xs sm:text-sm ${
               isLiked
-                ? 'text-white bg-red-600 hover:bg-red-700 shadow-md'
-                : 'text-neutral-600 hover:bg-neutral-100'
+                ? 'text-red-600 bg-red-50 border-red-200 hover:bg-red-100'
+                : 'text-neutral-600 bg-white border-neutral-200 hover:bg-neutral-50'
             }`}
           >
             <motion.div
@@ -276,7 +322,9 @@ const FeedCard = ({
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => setShowCommentInput(!showCommentInput)}
-            className="flex items-center justify-center px-2 sm:px-4 py-2 text-neutral-600 hover:bg-neutral-100 rounded-lg transition-colors text-xs sm:text-sm"
+            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-xl border transition-colors text-xs sm:text-sm ${
+              showCommentInput ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-neutral-600 bg-white border-neutral-200 hover:bg-neutral-50'
+            }`}
           >
             <FiMessageCircle className="w-4 h-4 sm:w-5 sm:h-5" />
             <span className="ml-1 sm:ml-2 text-xs sm:text-sm font-medium inline-block min-w-[32px] text-center">
@@ -289,8 +337,8 @@ const FeedCard = ({
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={handleShare}
-            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-lg transition-all font-medium text-xs sm:text-sm ${
-              sharePressed ? 'text-white bg-green-600 hover:bg-green-700 shadow-md' : 'text-neutral-600 hover:bg-neutral-100'
+            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-xl border transition-all font-medium text-xs sm:text-sm ${
+              sharePressed ? 'text-green-700 bg-green-50 border-green-200' : 'text-neutral-600 bg-white border-neutral-200 hover:bg-neutral-50'
             }`}
           >
             <motion.div
@@ -309,10 +357,10 @@ const FeedCard = ({
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={handleSave}
-            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-lg transition-all font-medium text-xs sm:text-sm ${
+            className={`flex items-center justify-center px-2 sm:px-4 py-2 rounded-xl border transition-all font-medium text-xs sm:text-sm ${
               isSaved
-                ? 'text-white bg-blue-600 hover:bg-blue-700 shadow-md'
-                : 'text-neutral-600 hover:bg-neutral-100'
+                ? 'text-blue-700 bg-blue-50 border-blue-200'
+                : 'text-neutral-600 bg-white border-neutral-200 hover:bg-neutral-50'
             }`}
           >
             <FiBookmark className={`w-4 h-4 sm:w-5 sm:h-5 ${isSaved ? 'fill-current' : ''}`} />
@@ -365,31 +413,50 @@ const FeedCard = ({
       <AnimatePresence>
         {showCommentInput && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="px-4 py-3 border-t border-neutral-100 bg-gray-50"
+            className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+            onClick={() => setShowCommentInput(false)}
           >
-            <form onSubmit={handleCommentSubmit} className="flex gap-2">
-              <input
-                type="text"
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Write a comment..."
-                className="flex-1 px-3 py-2 rounded-lg border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                autoFocus
-              />
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                type="submit"
-                disabled={!commentText.trim() || isSubmittingComment}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-1"
-              >
-                <FiSend className="w-4 h-4" />
-              </motion.button>
-            </form>
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-xl bg-white rounded-lg border border-neutral-200 p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-neutral-900">Add Comment</h4>
+                <button
+                  type="button"
+                  className="text-sm text-neutral-500 hover:text-neutral-700"
+                  onClick={() => setShowCommentInput(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <form onSubmit={handleCommentSubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder="Write a comment..."
+                  className="flex-1 px-3 py-2 rounded-lg border border-neutral-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                  autoFocus
+                />
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  type="submit"
+                  disabled={!commentText.trim() || isSubmittingComment}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-1"
+                >
+                  <FiSend className="w-4 h-4" />
+                </motion.button>
+              </form>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

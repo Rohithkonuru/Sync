@@ -44,12 +44,36 @@ async def update_current_user_profile(
     db = get_database()
     update_data = user_update.dict(exclude_unset=True)
     update_data["updated_at"] = datetime.utcnow()
-    
+
+    # detect new skills for growth score activity
+    new_skills = []
+    if "skills" in update_data:
+        old_skills = current_user.get("skills", []) or []
+        for skill in update_data["skills"]:
+            if skill not in old_skills:
+                new_skills.append(skill)
+
     await db.users.update_one(
         {"_id": ObjectId(current_user["_id"])},
         {"$set": update_data}
     )
-    
+
+    # record activities and update scores
+    try:
+        from app.services.sync_score import SyncScoreService
+        from app.services.growth_score import get_growth_score_service
+        uid = str(current_user["_id"])
+        sync_service = SyncScoreService()
+        growth_service = get_growth_score_service()
+        await sync_service.record_activity(uid, "profile_update")
+        await growth_service.record_activity(uid, "profile_updated")
+        # skills added
+        for _ in new_skills:
+            await sync_service.record_activity(uid, "skill_added")
+            await growth_service.record_activity(uid, "skill_added")
+    except Exception:
+        pass
+
     updated_user = await get_user_by_id(str(current_user["_id"]))
     return user_to_dict(updated_user)
 
@@ -535,12 +559,29 @@ async def upload_resume(
             # Update current_user dict with new resume_url for calculation
             current_user["resume_url"] = file_url
             ats_result = await calculate_ats_score(current_user)
-            
+
+            # determine if score improved
+            old_ats = (current_user.get("ats_score") or {}).get("score", 0)
+            new_score_val = ats_result.get("score", 0)
+
             # Save ATS score to user profile
             await db.users.update_one(
                 {"_id": ObjectId(current_user["_id"])},
                 {"$set": {"ats_score": ats_result}}
             )
+
+            # record sync and growth activity
+            try:
+                from app.services.sync_score import SyncScoreService
+                from app.services.growth_score import get_growth_score_service
+                uid = str(current_user["_id"])
+                sync_service = SyncScoreService()
+                growth_service = get_growth_score_service()
+                await sync_service.record_activity(uid, "ats_score_generated")
+                if new_score_val > old_ats:
+                    await growth_service.record_activity(uid, "ats_score_improved", amount=new_score_val - old_ats)
+            except Exception:
+                pass
         except Exception as e:
             print(f"Error calculating ATS score during upload: {e}")
             # Fallback ATS result so upload doesn't fail
@@ -673,6 +714,26 @@ async def get_ats_score(
     try:
         # Calculate ATS score
         score_data = await calculate_ats_score(current_user)
+        # optionally persist and record activity
+        try:
+            db = get_database()
+            uid = str(current_user["_id"])
+            old_ats = (current_user.get("ats_score") or {}).get("score", 0)
+            new_score = score_data.get("score", 0)
+            if new_score != old_ats:
+                await db.users.update_one(
+                    {"_id": ObjectId(uid)},
+                    {"$set": {"ats_score": score_data, "updated_at": datetime.utcnow()}}
+                )
+            from app.services.sync_score import SyncScoreService
+            from app.services.growth_score import get_growth_score_service
+            sync = SyncScoreService()
+            growth = get_growth_score_service()
+            await sync.record_activity(uid, "ats_score_generated")
+            if new_score > old_ats:
+                await growth.record_activity(uid, "ats_score_improved", amount=new_score-old_ats)
+        except Exception:
+            pass
         return score_data
     except Exception as e:
         raise HTTPException(

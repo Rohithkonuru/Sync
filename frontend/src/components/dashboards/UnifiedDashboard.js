@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useFeed } from '../../context/FeedContext';
 import { jobService, userService, notificationService, postService } from '../../services/api';
+import { getDashboardFeed } from '../../services/feedService';
+import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge, Input, Modal, ProgressBar } from '../ui';
 import { 
   FiBriefcase, FiUsers, FiTrendingUp, FiEye, FiSearch, FiFilter, FiUser, 
@@ -12,7 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import PostComposer from '../PostComposer';
-import FeedCard from '../FeedCard';
+import FeedCard from '../common/FeedCard';
 import { useSocket } from '../../context/SocketContext';
 
 /**
@@ -22,6 +25,7 @@ import { useSocket } from '../../context/SocketContext';
  */
 const UnifiedDashboard = () => {
   const { user } = useAuth();
+  const { getFeed, setFeed, removePost, upsertPost } = useFeed();
   const navigate = useNavigate();
   
   // -- Common State --
@@ -154,12 +158,14 @@ const UnifiedDashboard = () => {
     const [jobsData, appsData, postsData, suggestionsData] = await Promise.all([
       jobService.getJobs({ limit: 5 }).catch(() => []),
       jobService.getApplications({ limit: 5 }).catch(() => []),
-      postService.getPosts({ limit: 10 }).catch(() => []),
+      getDashboardFeed({ limit: 10, include_demo: true }).catch(() => getFeed('all')),
       userService.getSuggestions().catch(() => [])
     ]);
     setInternships(jobsData); // Using internships state for general jobs preview
     setMyApplications(appsData);
-    setFeedPosts(postsData);
+    const normalizedPosts = Array.isArray(postsData) ? postsData : [];
+    setFeedPosts(normalizedPosts);
+    setFeed('all', normalizedPosts);
     setSuggestions(suggestionsData || []);
     
     // Mock ATS Score check
@@ -270,8 +276,12 @@ const UnifiedDashboard = () => {
   const handleCreatePost = async (postData) => {
       try {
         const newPost = await postService.createPost(postData);
-        setFeedPosts(prev => [newPost, ...prev]);
-        toast.success('Post created successfully!');
+        setFeedPosts(prev => {
+          const next = [newPost, ...prev];
+          setFeed('all', next);
+          return next;
+        });
+        toast.success(TOAST_MESSAGES.POST_CREATED);
       } catch (error) {
         console.error('Error creating post:', error);
         throw error;
@@ -283,12 +293,14 @@ const UnifiedDashboard = () => {
       await postService.likePost(postId);
       // Optimistic update
       setFeedPosts(prev => prev.map(p => {
-        if (p.id === postId) {
+        if (String(p.id || p._id) === String(postId)) {
           const isLiked = p.likes?.includes(user.id);
           const newLikes = isLiked 
             ? p.likes.filter(id => id !== user.id)
             : [...(p.likes || []), user.id];
-          return { ...p, likes: newLikes };
+          const nextPost = { ...p, likes: newLikes };
+          upsertPost('all', nextPost);
+          return nextPost;
         }
         return p;
       }));
@@ -301,8 +313,12 @@ const UnifiedDashboard = () => {
     try {
       const comment = await postService.commentPost(postId, content);
       setFeedPosts(prev => prev.map(p => 
-        p.id === postId 
-          ? { ...p, comments: [...(p.comments || []), comment] }
+        String(p.id || p._id) === String(postId)
+          ? (() => {
+              const nextPost = { ...p, comments: [...(p.comments || []), comment] };
+              upsertPost('all', nextPost);
+              return nextPost;
+            })()
           : p
       ));
       return comment;
@@ -317,8 +333,12 @@ const UnifiedDashboard = () => {
       await postService.sharePost(postId);
       toast.success('Post shared!');
       setFeedPosts(prev => prev.map(p => 
-        p.id === postId 
-          ? { ...p, shares: (p.shares || 0) + 1 }
+        String(p.id || p._id) === String(postId)
+          ? (() => {
+              const nextPost = { ...p, shares: (p.shares || 0) + 1 };
+              upsertPost('all', nextPost);
+              return nextPost;
+            })()
           : p
       ));
     } catch (error) {
@@ -330,7 +350,8 @@ const UnifiedDashboard = () => {
     if (window.confirm('Are you sure you want to delete this post?')) {
       try {
         await postService.deletePost(postId);
-        setFeedPosts(prev => prev.filter(p => p.id !== postId));
+        removePost(postId);
+        setFeedPosts(prev => prev.filter(p => String(p.id || p._id) !== String(postId)));
         toast.success('Post deleted successfully');
       } catch (error) {
         const msg = error?.response?.data?.detail || 'Failed to delete post';
@@ -550,9 +571,9 @@ const UnifiedDashboard = () => {
                                 <h3 className="text-lg font-bold text-slate-800">Community Feed</h3>
                                 {feedPosts.map((post) => (
                                     <FeedCard 
-                                        key={post.id} 
+                                    key={post.id || post._id}
                                         post={post}
-                                        currentUserId={user?.id}
+                                    currentUserId={user?.id || user?._id}
                                         onLike={handleLikePost}
                                         onComment={handleCommentPost}
                                         onShare={handleSharePost}

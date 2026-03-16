@@ -19,7 +19,9 @@ const RecruiterDashboardEnhanced = () => {
     activeJobs: 0,
     totalApplicants: 0,
     shortlisted: 0,
-    interviews: 0
+    interviews: 0,
+    avgSyncScore: 0,
+    avgAtsScore: 0
   });
   const [error, setError] = useState(null);
 
@@ -43,23 +45,56 @@ const RecruiterDashboardEnhanced = () => {
       setError(null);
       const jobsData = await jobService.getMyJobs();
 
-      // Calculate stats
-      const activeJobs = (jobsData || []).filter(job => job.status === 'active');
-      let totalApplicants = 0;
+      const getJobId = (job) => job?.id || job?._id;
+      const parseScore = (value) => {
+        if (typeof value === 'number') return value;
+        if (value && typeof value.score === 'number') return value.score;
+        return 0;
+      };
 
-      // Count total applicants across all jobs
-      activeJobs.forEach(job => {
-        if (job.applicants && Array.isArray(job.applicants)) {
-          totalApplicants += job.applicants.length;
-        }
-      });
+      const allJobs = (jobsData || []).map((job) => ({
+        ...job,
+        id: getJobId(job)
+      }));
+
+      // Calculate stats
+      const activeJobs = allJobs.filter(job => ['active', 'open'].includes((job.status || '').toLowerCase()));
+
+      // Fetch applications for active jobs to compute accurate recruiter metrics.
+      const applicationsByJob = await Promise.all(
+        activeJobs.map(async (job) => {
+          try {
+            const applications = await jobService.getRecruiterJobApplications(job.id);
+            return Array.isArray(applications) ? applications : [];
+          } catch (_) {
+            return [];
+          }
+        })
+      );
+
+      const allApplications = applicationsByJob.flat();
+      const totalApplicants = allApplications.length;
+      const shortlisted = allApplications.filter((a) => ['shortlisted', 'accepted'].includes((a.status || '').toLowerCase())).length;
+      const interviews = allApplications.filter((a) => ['interview', 'interview_scheduled', 'in-processing', 'in_processing'].includes((a.status || '').toLowerCase())).length;
+
+      const syncScoreTotal = allApplications.reduce((sum, app) => {
+        return sum + parseScore(app.sync_score ?? app.applicant?.sync_score);
+      }, 0);
+      const atsScoreTotal = allApplications.reduce((sum, app) => {
+        return sum + parseScore(app.ats_score ?? app.applicant?.ats_score);
+      }, 0);
+
+      const avgSyncScore = totalApplicants > 0 ? Math.round(syncScoreTotal / totalApplicants) : 0;
+      const avgAtsScore = totalApplicants > 0 ? Math.round(atsScoreTotal / totalApplicants) : 0;
 
       setJobs(activeJobs);
       setStats({
         activeJobs: activeJobs.length,
-        totalApplicants: totalApplicants,
-        shortlisted: 0, // Would need to fetch applications to calculate this
-        interviews: 0   // Would need to fetch applications to calculate this
+        totalApplicants,
+        shortlisted,
+        interviews,
+        avgSyncScore,
+        avgAtsScore
       });
     } catch (error) {
       console.error('Error loading jobs:', error);
@@ -75,13 +110,8 @@ const RecruiterDashboardEnhanced = () => {
       setDeleting(jobId);
       await jobService.deleteJob(jobId);
       toast.success('Job deleted successfully');
-      setJobs(jobs.filter(job => job.id !== jobId));
       setConfirmDelete(null);
-      // Update stats
-      setStats(prev => ({
-        ...prev,
-        activeJobs: jobs.filter(j => j.id !== jobId).length
-      }));
+      await loadJobs();
     } catch (error) {
       console.error('Error deleting job:', error);
       toast.error('Failed to delete job');
@@ -181,6 +211,14 @@ const RecruiterDashboardEnhanced = () => {
                   <span className="text-sm text-gray-600">Interviews</span>
                   <span className="font-bold text-orange-600">{stats.interviews}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Avg Sync Score</span>
+                  <span className="font-bold text-indigo-600">{stats.avgSyncScore}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Avg ATS Score</span>
+                  <span className="font-bold text-emerald-600">{stats.avgAtsScore}%</span>
+                </div>
               </div>
             </Card>
 
@@ -253,11 +291,17 @@ const RecruiterDashboardEnhanced = () => {
                               <FiUsers className="w-3 h-3" />
                               {job.applicants?.length || 0} applicants
                             </span>
+                            {job.job_type && <span>{job.job_type}</span>}
                             <span>Posted {formatDate(job.created_at)}</span>
                           </div>
                         </div>
                         <div>
-                          <Badge variant="success" className="mb-2">Active</Badge>
+                          <Badge
+                            variant={(job.status || '').toLowerCase() === 'active' ? 'success' : 'neutral'}
+                            className="mb-2"
+                          >
+                            {job.status || 'active'}
+                          </Badge>
                         </div>
                       </div>
 
@@ -341,10 +385,10 @@ const RecruiterDashboardEnhanced = () => {
                 <Button
                   variant="outline"
                   className="w-full justify-start"
-                  onClick={() => navigate('/applications')}
+                  onClick={() => navigate('/jobs/my-jobs')}
                 >
                   <FiUsers className="w-4 h-4 mr-2" />
-                  View My Applications
+                  Manage Applicants
                 </Button>
               </div>
             </Card>

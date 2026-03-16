@@ -1,19 +1,57 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { postService, userService, jobService } from '../../services/api';
+import { postService, eventService, subscriptionService, interviewService } from '../../services/api';
+import { useFeed } from '../../context/FeedContext';
+import { getFeedByTab } from '../../services/feedService';
+import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge } from '../ui';
-import FeedCard from '../FeedCard';
+import FeedCard from '../common/FeedCard';
+import PostCreationModal from '../PostCreationModal';
 import {
-  FiHeart, FiMessageCircle, FiShare2, FiTrendingUp, FiUser, FiAward, FiZap, FiFileText, FiBriefcase, FiPlus, FiEye, FiSearch, FiUsers, FiRefreshCw, FiUpload, FiCheck, FiBookOpen, FiVideo, FiCalendar, FiEdit2, FiBookmark
+  FiShare2, FiTrendingUp, FiUser, FiFileText, FiEye, FiSearch, FiUsers, FiUpload, FiVideo, FiCalendar, FiEdit2, FiBookmark
 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
-import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
+const NEWS_ITEMS = [
+  {
+    id: 'leadership-trends',
+    title: 'Executive Leadership Trends',
+    source: 'Harvard Business Review',
+    time: '2h ago',
+    url: 'https://hbr.org/topic/leadership',
+  },
+  {
+    id: 'salary-report',
+    title: 'Tech Industry Salary Report',
+    source: 'TechCrunch',
+    time: '4h ago',
+    url: 'https://techcrunch.com/tag/salaries/',
+  },
+  {
+    id: 'ai-enterprise',
+    title: 'AI Innovation in Enterprise',
+    source: 'MIT Technology Review',
+    time: '6h ago',
+    url: 'https://www.technologyreview.com/topic/artificial-intelligence/',
+  },
+];
+
+const INITIAL_INTERVIEW_INVITES = [
+  {
+    id: 'netflix-senior-ui-1',
+    company: 'Netflix',
+    role: 'Senior UI Engineer',
+    schedule: 'Thu, 24 Aug 14:00',
+  },
+];
+
 const ProfessionalDashboardEnhanced = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const { setFeed, getFeed, removePost, upsertPost } = useFeed();
   const navigate = useNavigate();
+  const userId = user?._id || user?.id;
 
   const [posts, setPosts] = useState([]);
   const [stats, setStats] = useState({
@@ -24,43 +62,57 @@ const ProfessionalDashboardEnhanced = () => {
     searchAppearances: 156,
   });
   const [loading, setLoading] = useState(true);
+  const [feedLoading, setFeedLoading] = useState(false);
   const [activeFeedTab, setActiveFeedTab] = useState('all');
   const [filteredPosts, setFilteredPosts] = useState([]);
 
-  const [recommendedJobs, setRecommendedJobs] = useState([]);
+  const [showPostModal, setShowPostModal] = useState(false);
+  const [postType, setPostType] = useState('text');
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [eventSubmitting, setEventSubmitting] = useState(false);
+  const [eventForm, setEventForm] = useState({
+    event_title: '',
+    event_date: '',
+    event_description: '',
+    location: '',
+  });
+  const [trialStarting, setTrialStarting] = useState(false);
+  const [interviewInvites, setInterviewInvites] = useState(INITIAL_INTERVIEW_INVITES);
 
-  const resolveImageUrl = (url) => {
-    if (!url) return url;
-    if (url.startsWith('/uploads/')) {
-      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-      return `${base}${url}`;
-    }
-    return url;
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    filterPostsByTab();
-  }, [posts, activeFeedTab]);
-
-  const loadData = async () => {
+  const loadFeedByTab = useCallback(async (tab, isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) {
+        setLoading(true);
+      } else {
+        setFeedLoading(true);
+      }
 
-      // Parallel data fetching
-      const [postsData, suggestionsData, jobsData] = await Promise.all([
-        postService.getPosts({ limit: 10, include_demo: true }).catch(() => []),
-        userService.getSuggestions().catch(() => []),
-        jobService.getJobs({ limit: 5 }).catch(() => []),
-      ]);
+      const cached = getFeed(tab);
+      if (Array.isArray(cached) && cached.length > 0 && !isInitial) {
+        setPosts(cached);
+        setFilteredPosts(cached);
+      }
 
-      setPosts(postsData);
-      setRecommendedJobs(jobsData);
+      const data = await getFeedByTab(tab, userId, { limit: 10, include_recommended: true });
 
-      // Set demo stats
+      const nextPosts = Array.isArray(data) ? data : [];
+      setFeed(tab, nextPosts);
+      setPosts(nextPosts);
+      setFilteredPosts(nextPosts);
+    } catch (error) {
+      console.error('Error loading feed:', error);
+      toast.error(error?.message || TOAST_MESSAGES.FEED_LOAD_FAILED);
+      setPosts([]);
+      setFilteredPosts([]);
+    } finally {
+      setLoading(false);
+      setFeedLoading(false);
+    }
+  }, [getFeed, setFeed, userId]);
+
+  useEffect(() => {
+    const initialize = async () => {
+      await loadFeedByTab('all', true);
       setStats({
         profileViews: 1247,
         postImpressions: 3892,
@@ -68,62 +120,105 @@ const ProfessionalDashboardEnhanced = () => {
         engagementRate: '+23%',
         searchAppearances: 156,
       });
+    };
 
-    } catch (error) {
-      console.error('Error loading professional dashboard:', error);
-      if (error.response?.status === 503) {
-        toast.error('Service Unavailable: Database not connected');
-      } else {
-        toast.error('Failed to load dashboard data');
-      }
-    } finally {
-      setLoading(false);
-    }
+    initialize();
+  }, [loadFeedByTab]);
+
+  const handleFeedTabChange = async (tab) => {
+    setActiveFeedTab(tab);
+    await loadFeedByTab(tab);
   };
 
-  const filterPostsByTab = () => {
-    setFilteredPosts(posts);
+  const openPostModal = (type = 'text') => {
+    setPostType(type);
+    setShowPostModal(true);
   };
 
   const handleCreatePost = async (postData) => {
     try {
-      const newPost = await postService.createPost(postData);
-      setPosts(prev => [newPost, ...prev]);
-      toast.success('Post created successfully!');
+      const payload = {
+        content: postData.content || '',
+        images: postData.images || [],
+        media_url: postData.media_url,
+        media_type: postType === 'video' ? 'video' : (postData.images?.length ? 'image' : undefined),
+      };
+
+      const newPost = await postService.createPost(payload);
+      const nextPosts = [newPost, ...posts];
+      setFeed(activeFeedTab, nextPosts);
+      if (activeFeedTab !== 'all') {
+        upsertPost('all', newPost);
+      }
+      setPosts(nextPosts);
+      setFilteredPosts(nextPosts);
+      setShowPostModal(false);
+      setPostType('text');
+      toast.success(TOAST_MESSAGES.POST_CREATED);
     } catch (error) {
       console.error('Error creating post:', error);
+      toast.error(TOAST_MESSAGES.POST_CREATE_FAILED);
       throw error;
     }
   };
 
-  const handleLike = async (postId) => {
+  const handleCreateEvent = async (e) => {
+    e.preventDefault();
     try {
-      await postService.likePost(postId);
-      setPosts((prev) =>
-        prev.map((post) =>
-          post.id === postId
-            ? {
-                ...post,
-                likes: post.likes?.includes(user.id)
-                  ? post.likes.filter((id) => id !== user.id)
-                  : [...(post.likes || []), user.id],
-              }
-            : post
-        )
-      );
+      setEventSubmitting(true);
+      await eventService.createEvent(eventForm);
+      setShowEventModal(false);
+      setEventForm({ event_title: '', event_date: '', event_description: '', location: '' });
+      toast.success(TOAST_MESSAGES.EVENT_CREATED);
     } catch (error) {
-      toast.error('Failed to like post');
+      console.error('Error creating event:', error);
+      toast.error(TOAST_MESSAGES.EVENT_CREATE_FAILED);
+    } finally {
+      setEventSubmitting(false);
     }
   };
 
-  const handleComment = (postId) => {
-    navigate(`/posts/${postId}`);
+  const handleOpenNews = (url) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const handleShare = (postId) => {
-    const url = `${window.location.origin}/posts/${postId}`;
-    navigator.clipboard.writeText(url);
-    toast.success('Link copied to clipboard!');
+  const handleStartTrial = async () => {
+    try {
+      setTrialStarting(true);
+      const response = await subscriptionService.startTrial();
+      updateUser({
+        ...user,
+        premium_status: true,
+      });
+      toast.success(response?.message || 'Premium trial activated!');
+    } catch (error) {
+      console.error('Error starting trial:', error);
+      toast.error('Failed to start premium trial');
+    } finally {
+      setTrialStarting(false);
+    }
+  };
+
+  const handleAcceptInterview = async (inviteId) => {
+    try {
+      await interviewService.acceptInvite(inviteId);
+      setInterviewInvites((prev) => prev.filter((invite) => invite.id !== inviteId));
+      toast.success('Interview accepted!');
+    } catch (error) {
+      console.error('Error accepting invite:', error);
+      toast.error('Failed to accept interview invite');
+    }
+  };
+
+  const handleDeclineInterview = async (inviteId) => {
+    try {
+      await interviewService.declineInvite(inviteId);
+      setInterviewInvites((prev) => prev.filter((invite) => invite.id !== inviteId));
+      toast.success('Interview declined!');
+    } catch (error) {
+      console.error('Error declining invite:', error);
+      toast.error('Failed to decline interview invite');
+    }
   };
 
   if (loading) {
@@ -152,54 +247,6 @@ const ProfessionalDashboardEnhanced = () => {
   return (
     <div className="min-h-screen bg-neutral-50 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-
-        {/* Top Stats Row - Professional Focused */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white border-none">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-100 text-sm font-medium">Profile Views</p>
-                <h3 className="text-2xl font-bold mt-1">{stats.profileViews}</h3>
-                <div className="flex items-center mt-2 text-xs text-blue-100 bg-white/10 px-2 py-1 rounded w-fit">
-                  <FiTrendingUp className="mr-1" /> +12% this week
-                </div>
-              </div>
-              <div className="p-3 bg-white/20 rounded-lg">
-                <FiEye className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </Card>
-
-          <Card>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-500">Search Appearances</h3>
-              <FiSearch className="text-blue-600" />
-            </div>
-            <p className="text-2xl font-bold text-gray-900">{stats.searchAppearances}</p>
-            <p className="text-xs text-blue-600 mt-1 flex items-center">
-              <span className="w-2 h-2 rounded-full bg-blue-500 mr-1"></span>
-              5 Recruiters found you
-            </p>
-          </Card>
-
-          <Card>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-500">Post Impressions</h3>
-              <FiShare2 className="text-blue-600" />
-            </div>
-            <p className="text-2xl font-bold text-gray-900">{stats.postImpressions}</p>
-            <p className="text-xs text-gray-500 mt-1">Last 7 days</p>
-          </Card>
-
-          <Card>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-gray-500">Connections</h3>
-              <FiUsers className="text-purple-600" />
-            </div>
-            <p className="text-2xl font-bold text-gray-900">{stats.connections}</p>
-            <p className="text-xs text-gray-500 mt-1">Grow your network</p>
-          </Card>
-        </div>
 
         <motion.div
           className="grid grid-cols-1 lg:grid-cols-12 gap-6"
@@ -247,7 +294,16 @@ const ProfessionalDashboardEnhanced = () => {
                 <h3 className="font-bold text-gray-900 text-sm">Connections</h3>
                 <p className="text-2xl font-bold text-blue-600 mt-1">{stats.connections}</p>
                 <p className="text-sm text-gray-500">Grow your network</p>
-                <Button variant="outline" size="sm" className="mt-3 w-full text-xs" onClick={() => {}}>Find Connections</Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 w-full text-xs"
+                    onClick={() => navigate('/network')}
+                  >
+                    Find Connections
+                  </Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -259,15 +315,27 @@ const ProfessionalDashboardEnhanced = () => {
                 <FiBookmark className="text-blue-500" /> Saved Items
               </h3>
               <div className="space-y-2">
-                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer">
+                <motion.div
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer"
+                  onClick={() => navigate('/saved')}
+                >
                   <p className="font-medium text-xs">Leadership Course 2024</p>
                   <p className="text-xs text-gray-500">Saved 3 days ago</p>
-                </div>
-                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer">
+                </motion.div>
+                <motion.div
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer"
+                  onClick={() => navigate('/saved')}
+                >
                   <p className="font-medium text-xs">Executive Networking Guide</p>
                   <p className="text-xs text-gray-500">Saved 1 week ago</p>
-                </div>
-                <Button variant="ghost" size="sm" className="text-blue-600 w-full text-xs" onClick={() => {}}>View All Saved</Button>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button variant="ghost" size="sm" className="text-blue-600 w-full text-xs" onClick={() => navigate('/saved')}>View All Saved</Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -288,30 +356,57 @@ const ProfessionalDashboardEnhanced = () => {
                     <FiUser className="text-gray-500" />
                   )}
                 </div>
-                <button 
-                  onClick={() => {}}
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  type="button"
+                  onClick={() => openPostModal('text')}
                   className="flex-1 text-left text-gray-500 bg-gray-100 rounded-full px-4 py-2 hover:bg-gray-200 transition-colors"
                 >
                   Start a post
-                </button>
+                </motion.button>
               </div>
               <div className="flex items-center justify-around px-3 pb-3 border-t border-gray-100">
-                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" onClick={() => {}}>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors"
+                  onClick={() => openPostModal('photo')}
+                >
                   <FiUpload className="w-5 h-5" />
                   <span className="text-sm">Photo</span>
-                </button>
-                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" onClick={() => {}}>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors"
+                  onClick={() => openPostModal('video')}
+                >
                   <FiVideo className="w-5 h-5" />
                   <span className="text-sm">Video</span>
-                </button>
-                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" onClick={() => {}}>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors"
+                  onClick={() => setShowEventModal(true)}
+                >
                   <FiCalendar className="w-5 h-5" />
                   <span className="text-sm">Event</span>
-                </button>
-                <button className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" onClick={() => {}}>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  type="button"
+                  className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors"
+                  onClick={() => navigate('/articles/create')}
+                >
                   <FiEdit2 className="w-5 h-5" />
                   <span className="text-sm">Write article</span>
-                </button>
+                </motion.button>
               </div>
             </Card>
             </motion.div>
@@ -319,9 +414,11 @@ const ProfessionalDashboardEnhanced = () => {
             {/* Feed Tabs */}
             <motion.div variants={itemVariants} className="flex border-b border-gray-200 bg-white rounded-t-lg px-4 pt-2">
               {['all', 'network', 'saved'].map((tab) => (
-                <button
+                <motion.button
                   key={tab}
-                  onClick={() => setActiveFeedTab(tab)}
+                  onClick={() => handleFeedTabChange(tab)}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
                     activeFeedTab === tab
                       ? 'border-blue-500 text-blue-600'
@@ -329,22 +426,40 @@ const ProfessionalDashboardEnhanced = () => {
                   }`}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                </button>
+                </motion.button>
               ))}
             </motion.div>
 
             {/* Posts Feed */}
             <div className="space-y-4">
+              {feedLoading && (
+                <div className="text-sm text-gray-500">Loading posts...</div>
+              )}
               <AnimatePresence mode="popLayout">
                 {filteredPosts && filteredPosts.length > 0 ? (
                   filteredPosts.map((post) => (
                     <FeedCard
                       key={post.id || post._id}
                       post={post}
-                      currentUserId={user._id}
-                      onPostUpdate={(postId) => {
-                        setPosts(prev => prev.filter(p => (p.id || p._id) !== postId));
-                        toast.success('Post deleted');
+                      currentUserId={user?._id || user?.id}
+                      onPostUpdate={(postUpdate) => {
+                        if (typeof postUpdate === 'string') {
+                          removePost(postUpdate);
+                          setPosts((prev) => prev.filter((p) => String(p.id || p._id) !== String(postUpdate)));
+                          setFilteredPosts((prev) => prev.filter((p) => String(p.id || p._id) !== String(postUpdate)));
+                          toast.success('Post deleted');
+                          return;
+                        }
+
+                        if (postUpdate?.id || postUpdate?._id) {
+                          upsertPost(activeFeedTab, postUpdate);
+                          setPosts((prev) => prev.map((p) =>
+                            String(p.id || p._id) === String(postUpdate.id || postUpdate._id) ? { ...p, ...postUpdate } : p
+                          ));
+                          setFilteredPosts((prev) => prev.map((p) =>
+                            String(p.id || p._id) === String(postUpdate.id || postUpdate._id) ? { ...p, ...postUpdate } : p
+                          ));
+                        }
                       }}
                     />
                   ))
@@ -373,18 +488,19 @@ const ProfessionalDashboardEnhanced = () => {
             <Card>
               <h3 className="font-bold text-gray-900 mb-4 text-sm">Today's news and views</h3>
               <div className="space-y-3">
-                <div className="border-b border-gray-100 pb-3">
-                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Executive Leadership Trends</h4>
-                  <p className="text-xs text-gray-500 mt-1">Harvard Business Review • 2h ago</p>
-                </div>
-                <div className="border-b border-gray-100 pb-3">
-                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Tech Industry Salary Report</h4>
-                  <p className="text-xs text-gray-500 mt-1">TechCrunch • 4h ago</p>
-                </div>
-                <div className="pb-3">
-                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">AI Innovation in Enterprise</h4>
-                  <p className="text-xs text-gray-500 mt-1">MIT Review • 6h ago</p>
-                </div>
+                {NEWS_ITEMS.map((news, idx) => (
+                  <div key={news.id} className={idx < NEWS_ITEMS.length - 1 ? 'border-b border-gray-100 pb-3' : 'pb-3'}>
+                    <motion.h4
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer"
+                      onClick={() => handleOpenNews(news.url)}
+                    >
+                      {news.title}
+                    </motion.h4>
+                    <p className="text-xs text-gray-500 mt-1">{news.source} • {news.time}</p>
+                  </div>
+                ))}
               </div>
             </Card>
             </motion.div>
@@ -396,7 +512,11 @@ const ProfessionalDashboardEnhanced = () => {
                 <div className="text-3xl mb-2">🚀</div>
                 <h3 className="font-bold text-gray-900 text-sm mb-2">Your next career move awaits</h3>
                 <p className="text-xs text-gray-600 mb-4">Top opportunities for senior professionals</p>
-                <Button size="sm" className="bg-amber-600 text-white w-full text-xs" onClick={() => {}}>Start Free Trial</Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button size="sm" className="bg-amber-600 text-white w-full text-xs" onClick={handleStartTrial} disabled={trialStarting}>
+                    {trialStarting ? 'Starting...' : 'Start Free Trial'}
+                  </Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -428,7 +548,9 @@ const ProfessionalDashboardEnhanced = () => {
                   <span className="text-xs text-gray-400">1 week ago</span>
                 </div>
               </div>
-              <Button variant="ghost" size="sm" fullWidth className="mt-2 text-blue-600" onClick={() => {}}>See all views</Button>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button variant="ghost" size="sm" fullWidth className="mt-2 text-blue-600" onClick={() => navigate('/analytics/profile-views')}>See all views</Button>
+              </motion.div>
             </Card>
             </motion.div>
 
@@ -436,15 +558,23 @@ const ProfessionalDashboardEnhanced = () => {
             <motion.div variants={itemVariants}>
             <Card>
               <h3 className="font-bold text-gray-900 mb-4 text-sm">Interview Invites</h3>
-              <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg mb-2">
-                <p className="font-bold text-gray-900 text-sm">Netflix</p>
-                <p className="text-xs text-gray-600">Senior UI Engineer</p>
-                <p className="text-xs text-blue-700 font-medium mt-1">Thu, 24 Aug 14:00</p>
-                <div className="flex gap-2 mt-2">
-                  <Button size="sm" className="h-7 text-xs px-2 bg-blue-600 text-white" onClick={() => toast.success('Interview accepted!')}>Accept</Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs px-2 bg-white" onClick={() => {}}>Decline</Button>
+              {interviewInvites.length > 0 ? interviewInvites.map((invite) => (
+                <div key={invite.id} className="p-3 bg-blue-50 border border-blue-100 rounded-lg mb-2">
+                  <p className="font-bold text-gray-900 text-sm">{invite.company}</p>
+                  <p className="text-xs text-gray-600">{invite.role}</p>
+                  <p className="text-xs text-blue-700 font-medium mt-1">{invite.schedule}</p>
+                  <div className="flex gap-2 mt-2">
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button size="sm" className="h-7 text-xs px-2 bg-blue-600 text-white" onClick={() => handleAcceptInterview(invite.id)}>Accept</Button>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button size="sm" variant="outline" className="h-7 text-xs px-2 bg-white" onClick={() => handleDeclineInterview(invite.id)}>Decline</Button>
+                    </motion.div>
+                  </div>
                 </div>
-              </div>
+              )) : (
+                <p className="text-xs text-gray-500">No pending interview invites.</p>
+              )}
             </Card>
             </motion.div>
 
@@ -478,6 +608,74 @@ const ProfessionalDashboardEnhanced = () => {
           </div>
         </motion.div>
       </div>
+
+      <PostCreationModal
+        isOpen={showPostModal}
+        onClose={() => {
+          setShowPostModal(false);
+          setPostType('text');
+        }}
+        postType={postType}
+        onSubmit={handleCreatePost}
+      />
+
+      <AnimatePresence>
+        {showEventModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 z-50 p-4 flex items-center justify-center"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-lg max-w-lg w-full"
+            >
+              <div className="flex items-center justify-between p-4 border-b border-gray-200">
+                <h3 className="text-lg font-semibold text-gray-900">Create Event</h3>
+                <button type="button" onClick={() => setShowEventModal(false)} className="text-gray-400 hover:text-gray-600">x</button>
+              </div>
+              <form onSubmit={handleCreateEvent} className="p-4 space-y-3">
+                <input
+                  value={eventForm.event_title}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, event_title: e.target.value }))}
+                  placeholder="Event title"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+                <input
+                  type="date"
+                  value={eventForm.event_date}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, event_date: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+                <textarea
+                  value={eventForm.event_description}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, event_description: e.target.value }))}
+                  placeholder="Event description"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  rows={4}
+                />
+                <input
+                  value={eventForm.location}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value }))}
+                  placeholder="Location"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
+                <div className="flex justify-end gap-2 pt-2">
+                  <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                    <Button type="button" variant="outline" onClick={() => setShowEventModal(false)}>Cancel</Button>
+                  </motion.div>
+                  <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                    <Button type="submit" disabled={eventSubmitting}>{eventSubmitting ? 'Creating...' : 'Create Event'}</Button>
+                  </motion.div>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

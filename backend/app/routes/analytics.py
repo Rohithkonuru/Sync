@@ -184,3 +184,48 @@ async def get_recruiter_analytics_overview(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error fetching analytics overview: {str(e)}"
         )
+
+
+# new endpoints -----------------------------------------------------------
+@router.get("/sync-score/{user_id}")
+async def analytics_sync_score(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Return sync & growth scores along with breakdown metrics"""
+    requester_id = str(current_user.get("_id"))
+    # only user themselves or recruiters may view
+    if requester_id != user_id and current_user.get("user_type") != "recruiter":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    from app.services.sync_score import SyncScoreService
+    from app.services.growth_score import get_growth_score_service
+
+    sync_service = SyncScoreService()
+    growth_service = get_growth_score_service()
+
+    # refresh scores before returning
+    await sync_service.update_sync_score(user_id)
+    await growth_service.update_growth_score(user_id)
+
+    sync_data = await sync_service.get_sync_score(user_id, requester_id, current_user.get("user_type"))
+    growth_data = await growth_service.get_growth_score(user_id, requester_id, current_user.get("user_type"))
+
+    return {
+        "sync_score": sync_data.get("score", 0),
+        "profile_completion": sync_data.get("profile_completion", 0),
+        "connections": sync_data.get("connections", 0),
+        "posts": sync_data.get("posts", 0),
+        "applications": sync_data.get("applications", 0),
+        "updated_at": sync_data.get("updated_at"),
+        "growth_score": growth_data.get("growth_score", 0) if growth_data else 0,
+        "growth_score_updated": growth_data.get("growth_score_updated") if growth_data else None,
+    }
+
+@router.get("/growth-score/{user_id}")
+async def analytics_growth_score(
+    user_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Return growth score with additional context"""
+    return await analytics_sync_score(user_id, current_user)

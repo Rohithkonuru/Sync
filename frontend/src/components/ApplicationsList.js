@@ -1,15 +1,20 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { FiBriefcase, FiClock, FiCheckCircle, FiX, FiEye, FiDownload, FiChevronRight } from 'react-icons/fi';
 import ApplicationTimeline from './ApplicationTimeline';
 
 const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = false }) => {
-  const navigate = useNavigate();
   const [expandedId, setExpandedId] = useState(null);
 
+  const normalizeStatus = (status) => {
+    const value = (status || '').toLowerCase().trim();
+    if (value === 'under_review') return 'seen';
+    if (value === 'in_processing') return 'in-processing';
+    return value || 'submitted';
+  };
+
   const getStatusColor = (status) => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case 'accepted':
         return 'bg-success-100 text-success-800 border-success-300';
       case 'shortlisted':
@@ -28,7 +33,7 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
   };
 
   const getStatusIcon = (status) => {
-    switch (status) {
+    switch (normalizeStatus(status)) {
       case 'accepted':
         return <FiCheckCircle className="w-4 h-4" />;
       case 'rejected':
@@ -45,12 +50,15 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
       'drafted': 'Drafted',
       'submitted': 'Submitted',
       'seen': 'Seen',
+      'under_review': 'Seen',
       'in-processing': 'In Processing',
+      'in_processing': 'In Processing',
       'shortlisted': 'Shortlisted',
       'accepted': 'Accepted',
       'rejected': 'Rejected',
     };
-    return labels[status] || status;
+    const normalized = normalizeStatus(status);
+    return labels[normalized] || normalized;
   };
 
   if (applications.length === 0) {
@@ -87,10 +95,10 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
                   )}
                   <div className="flex-1 min-w-0">
                     <h3 className="text-lg font-semibold text-black mb-1 truncate">
-                      {application.job?.title || 'Job Application'}
+                      {application.job_title || application.job?.title || 'Job Application'}
                     </h3>
                     <p className="text-sm text-black">
-                      {application.job?.company_name || 'Company'}
+                      {application.company_name || application.job?.company_name || 'Company'}
                       {application.job?.location && ` • ${application.job.location}`}
                     </p>
                   </div>
@@ -104,6 +112,11 @@ const ApplicationsList = ({ applications = [], onDownloadResume, showTimeline = 
                   <span className="text-xs text-black">
                     Applied {formatDistanceToNow(new Date(application.applied_at || application.created_at), { addSuffix: true })}
                   </span>
+                  {application.updated_at && (
+                    <span className="text-xs text-black">
+                      Updated {formatDistanceToNow(new Date(application.updated_at), { addSuffix: true })}
+                    </span>
+                  )}
                 </div>
 
                 {application.skills && application.skills.length > 0 && (

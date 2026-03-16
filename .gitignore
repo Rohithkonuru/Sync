@@ -301,3 +301,5 @@ pip-delete-this-directory.txt
 
 # Project specific
 # Add any project-specific ignore patterns here
+.vercel
+.env*.local

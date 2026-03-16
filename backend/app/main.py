@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from dotenv import load_dotenv
-from app.routes import auth, users, posts, jobs, messages, companies, notifications, connections
+from app.routes import auth, users, posts, jobs, messages, companies, notifications, connections, analytics, events, subscriptions, interviews
 from app.services.socket_manager import sio
 from app.database import connect_to_mongo, close_mongo_connection
 from socketio import ASGIApp
@@ -47,6 +47,10 @@ app.include_router(messages.router, prefix="/api/messages", tags=["Messages"])
 app.include_router(companies.router, prefix="/api/companies", tags=["Companies"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
 app.include_router(connections.router, prefix="/api/connections", tags=["Connections"])
+app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+app.include_router(events.router, prefix="/api/events", tags=["Events"])
+app.include_router(subscriptions.router, prefix="/api/subscriptions", tags=["Subscriptions"])
+app.include_router(interviews.router, prefix="/api/interviews", tags=["Interviews"])
 
 # Socket.io integration
 # Wrap FastAPI app with Socket.io

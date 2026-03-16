@@ -115,6 +115,13 @@ async def create_user(user_data: dict):
     user_data["updated_at"] = datetime.utcnow()
     user_data["connections"] = []
     user_data["connection_requests"] = []
+    # score tracking fields
+    user_data["sync_score"] = 0
+    user_data["growth_score"] = 0
+    user_data["profile_completion"] = 0
+    user_data["last_activity"] = None
+    user_data["previous_sync_score"] = 0
+    user_data["previous_ats_score"] = 0
     
     # Initialize arrays if not provided
     user_data["skills"] = user_data.get("skills") or []

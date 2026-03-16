@@ -133,6 +133,19 @@ async def accept_connection_request(
         {"_id": ObjectId(user_id)},
         {"$addToSet": {"connections": str(current_user["_id"])}}
     )
+
+    # record activities for both users
+    try:
+        from app.services.sync_score import SyncScoreService
+        from app.services.growth_score import get_growth_score_service
+        sync_service = SyncScoreService()
+        growth_service = get_growth_score_service()
+        await sync_service.record_activity(str(current_user["_id"]), "connection_added")
+        await sync_service.record_activity(user_id, "connection_added")
+        await growth_service.record_activity(str(current_user["_id"]), "connection_added")
+        await growth_service.record_activity(user_id, "connection_added")
+    except Exception:
+        pass
     
     # Create notification for requester
     notification_data = await create_notification(

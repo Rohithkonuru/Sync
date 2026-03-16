@@ -15,6 +15,8 @@ class PostBase(BaseModel):
     content: str
     images: List[str] = []
     certificate_id: Optional[str] = None
+    media_url: Optional[str] = None
+    media_type: Optional[str] = Field(default=None, pattern=r"^(image|video)$")
 
 class PostCreate(PostBase):
     pass
@@ -27,6 +29,8 @@ class PostResponse(BaseModel):
     content: str
     images: List[str] = []
     certificate_id: Optional[str] = None
+    media_url: Optional[str] = None
+    media_type: Optional[str] = None
     likes: List[str] = []
     comments: List[Comment] = []
     shares: int = 0

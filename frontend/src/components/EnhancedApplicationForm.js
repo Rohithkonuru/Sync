@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { jobService } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { jobService, userService } from '../services/api';
 import { FiX, FiUpload, FiFile, FiTrash2 } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 
 const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
+  const { user: currentUser } = useAuth();
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -21,8 +23,58 @@ const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
   const [newSkill, setNewSkill] = useState('');
   const [resumeFile, setResumeFile] = useState(null);
   const [resumeFileName, setResumeFileName] = useState('');
+  const [profileResumeUrl, setProfileResumeUrl] = useState('');
+  const [loadingProfile, setLoadingProfile] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+
+  const getExperienceYearsFromProfile = (experience = []) => {
+    if (!Array.isArray(experience) || experience.length === 0) return '';
+    return experience.length * 2;
+  };
+
+  useEffect(() => {
+    const loadProfileDefaults = async () => {
+      if (!currentUser) {
+        setLoadingProfile(false);
+        return;
+      }
+
+      try {
+        const profileId = currentUser.id || currentUser._id;
+        const profile = profileId ? await userService.getProfile(profileId) : currentUser;
+        const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim();
+        const normalizedSkills = Array.isArray(profile?.skills)
+          ? profile.skills.map((skill) => (typeof skill === 'string' ? skill : skill?.name)).filter(Boolean)
+          : [];
+
+        setFormData((prev) => ({
+          ...prev,
+          full_name: prev.full_name || fullName,
+          email: prev.email || profile?.email || '',
+          contact_number: prev.contact_number || profile?.phone || '',
+          address: prev.address || profile?.location || '',
+          contact_email: prev.contact_email || profile?.email || '',
+          contact_phone: prev.contact_phone || profile?.phone || '',
+          portfolio_url: prev.portfolio_url || profile?.portfolio_url || profile?.projects?.[0]?.url || '',
+          skills: prev.skills.length > 0 ? prev.skills : normalizedSkills,
+          experience_years: prev.experience_years || getExperienceYearsFromProfile(profile?.experience),
+        }));
+
+        if (profile?.resume_url) {
+          setProfileResumeUrl(profile.resume_url);
+          const resumeName = profile.resume_url.split('/').pop();
+          setResumeFileName(resumeName || 'Profile resume');
+        }
+      } catch (error) {
+        console.error('Failed to load profile defaults:', error);
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+
+    loadProfileDefaults();
+  }, [currentUser]);
 
   const validateForm = () => {
     const newErrors = {};
@@ -44,7 +96,7 @@ const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
       newErrors.contact_number = 'Invalid phone number format';
     }
     
-    if (!resumeFile) {
+    if (!resumeFile && !profileResumeUrl) {
       newErrors.resume = 'Resume upload is required';
     }
     
@@ -107,6 +159,7 @@ const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
       
       setResumeFile(file);
       setResumeFileName(file.name);
+      setProfileResumeUrl('');
       setUploadProgress(0);
     }
   };
@@ -114,6 +167,7 @@ const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
   const handleRemoveFile = () => {
     setResumeFile(null);
     setResumeFileName('');
+    setProfileResumeUrl('');
   };
 
   const handleAddSkill = () => {
@@ -383,11 +437,11 @@ const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
             {errors.resume && (
               <p className="text-red-500 text-sm mb-2">{errors.resume}</p>
             )}
-            {!resumeFile ? (
+            {!resumeFile && !profileResumeUrl ? (
               <label className="flex items-center justify-center w-full border-2 border-dashed border-gray-300 rounded-lg p-6 cursor-pointer hover:border-primary-500 transition">
                 <div className="text-center">
                   <FiUpload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-sm text-gray-600">Click to upload or drag and drop</p>
+                  <p className="text-sm text-gray-600">{loadingProfile ? 'Loading profile...' : 'Click to upload or drag and drop'}</p>
                   <p className="text-xs text-gray-500 mt-1">PDF, DOC, DOCX (Max 5MB)</p>
                 </div>
                 <input
@@ -402,15 +456,20 @@ const EnhancedApplicationForm = ({ jobId, jobTitle, onClose, onSuccess }) => {
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex items-center space-x-2">
                     <FiFile className="w-5 h-5 text-gray-600" />
-                    <span className="text-sm text-gray-700">{resumeFileName}</span>
+                    <span className="text-sm text-gray-700">{resumeFileName || 'Profile resume'}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleRemoveFile}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <FiTrash2 className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {profileResumeUrl && !resumeFile && (
+                      <span className="text-xs text-green-600">Using profile resume</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleRemoveFile}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      <FiTrash2 className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
                 {uploadProgress > 0 && uploadProgress < 100 && (
                   <div className="w-full bg-gray-200 rounded-full h-2">

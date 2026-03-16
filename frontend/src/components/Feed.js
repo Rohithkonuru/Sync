@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { postService } from '../services/api';
-import { FaHeart, FaComment, FaShare, FaUser } from 'react-icons/fa';
+import { FaHeart, FaComment, FaShare, FaUser, FaTrash } from 'react-icons/fa';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -10,8 +10,14 @@ const Feed = () => {
   const { user } = useAuth();
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [error, setError] = useState(null);
   const [newPost, setNewPost] = useState('');
   const [commentInputs, setCommentInputs] = useState({});
+  const observerRef = useRef(null);
+  const PAGE_SIZE = 10;
+  const currentUserId = user?.id || user?._id;
 
   const resolveImageUrl = (url) => {
     if (!url) return url;
@@ -22,71 +28,140 @@ const Feed = () => {
     return url;
   };
 
-  useEffect(() => {
-    fetchPosts();
-  }, []);
-
-  const fetchPosts = async () => {
-    try {
-      const response = await postService.getPosts({ limit: 20 });
-      setPosts(response);
-    } catch (error) {
-      console.error('Error fetching posts:', error);
-      toast.error('Failed to load posts');
-    } finally {
-      setLoading(false);
+  const fetchPosts = useCallback((opts = { append: false }) => {
+    const controller = new AbortController();
+    const skip = opts.append ? posts.length : 0;
+    const limit = PAGE_SIZE;
+    if (!opts.append) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setLoadingMore(true);
     }
-  };
 
-  const handleCreatePost = async (e) => {
+    postService
+      .getPosts({ skip, limit, signal: controller.signal })
+      .then((response = []) => {
+        const safeArray = Array.isArray(response) ? response : [];
+        setPosts((prev) => (opts.append ? [...prev, ...safeArray] : safeArray));
+        setHasMore(safeArray.length === limit);
+      })
+      .catch((fetchError) => {
+        if (fetchError.name === 'AbortError') return;
+        console.error('Error fetching posts:', fetchError);
+        setError('Failed to load posts');
+        toast.error('Failed to load posts');
+      })
+      .finally(() => {
+        setLoading(false);
+        setLoadingMore(false);
+      });
+
+    return () => controller.abort();
+  }, [PAGE_SIZE, posts.length]);
+
+  useEffect(() => {
+    const abort = fetchPosts();
+    return () => abort?.();
+  }, [fetchPosts]);
+
+  // Infinite scroll
+  useEffect(() => {
+    if (!hasMore || loadingMore) return;
+    const sentinel = observerRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) {
+        fetchPosts({ append: true });
+      }
+    });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [fetchPosts, hasMore, loadingMore]);
+
+  const handleCreatePost = useCallback(async (e) => {
     e.preventDefault();
     if (!newPost.trim()) return;
 
     try {
       const response = await postService.createPost({ content: newPost });
-      setPosts([response, ...posts]);
+      setPosts((prev) => [response, ...prev]);
       setNewPost('');
       toast.success('Post created successfully!');
     } catch (error) {
       console.error('Error creating post:', error);
       toast.error('Failed to create post');
     }
-  };
+  }, [newPost]);
 
-  const handleLike = async (postId) => {
+  const handleLike = useCallback(async (postId) => {
+    // Optimistic update for snappier UI
+    setPosts((prev) =>
+      prev.map((post) => {
+        if (post.id !== postId) return post;
+        const isLiked = post.likes?.includes(currentUserId);
+        const nextLikes = isLiked
+          ? (post.likes || []).filter((id) => id !== currentUserId)
+          : [...(post.likes || []), currentUserId];
+        return { ...post, likes: nextLikes };
+      })
+    );
+
     try {
       const response = await postService.likePost(postId);
-      setPosts(posts.map(post =>
-        post.id === postId
-          ? { ...post, likes: response.liked ? [...(post.likes || []), user?.id] : (post.likes || []).filter(id => id !== user?.id) }
-          : post
-      ));
+      setPosts((prev) =>
+        prev.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                likes: response.liked
+                  ? [...(post.likes || []), currentUserId]
+                  : (post.likes || []).filter((id) => id !== currentUserId),
+              }
+            : post
+        )
+      );
     } catch (error) {
       console.error('Error liking post:', error);
       toast.error('Failed to like post');
+      // Revert optimistic update on error
+      setPosts((prev) =>
+        prev.map((post) => {
+          if (post.id !== postId) return post;
+          const isLiked = post.likes?.includes(currentUserId);
+          const nextLikes = isLiked
+            ? (post.likes || []).filter((id) => id !== currentUserId)
+            : [...(post.likes || []), currentUserId];
+          return { ...post, likes: nextLikes };
+        })
+      );
     }
-  };
+  }, [currentUserId]);
 
-  const handleComment = async (postId) => {
+  const handleComment = useCallback(async (postId) => {
     const content = commentInputs[postId];
     if (!content?.trim()) return;
 
     try {
       const response = await postService.commentPost(postId, content);
-      setPosts(posts.map(post =>
-        post.id === postId
-          ? { ...post, comments: [...post.comments, response] }
-          : post
-      ));
-      setCommentInputs({ ...commentInputs, [postId]: '' });
+      setPosts((prev) =>
+        prev.map((post) =>
+          post.id === postId
+            ? { ...post, comments: [...post.comments, response] }
+            : post
+        )
+      );
+      setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
       toast.success('Comment added!');
     } catch (error) {
       console.error('Error commenting on post:', error);
       toast.error('Failed to add comment');
     }
-  };
+  }, [commentInputs]);
 
-  const handleShare = async (postId) => {
+  const handleShare = useCallback(async (postId) => {
     try {
       await postService.sharePost(postId);
       toast.success('Post shared!');
@@ -94,19 +169,19 @@ const Feed = () => {
       console.error('Error sharing post:', error);
       toast.error('Failed to share post');
     }
-  };
+  }, []);
 
-  if (loading) {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="flex justify-center items-center py-8"
-      >
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </motion.div>
-    );
-  }
+  const handleDelete = useCallback(async (postId) => {
+    try {
+      await postService.deletePost(postId);
+      setPosts((prev) => prev.filter((post) => post.id !== postId));
+      toast.success('Post deleted successfully');
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      const msg = error?.response?.data?.detail || 'Failed to delete post';
+      toast.error(msg);
+    }
+  }, []);
 
   return (
     <motion.div
@@ -115,6 +190,30 @@ const Feed = () => {
       transition={{ duration: 0.5 }}
       className="max-w-2xl mx-auto space-y-6"
     >
+      {loading && (
+        <div className="space-y-4">
+          {[...Array(3)].map((_, idx) => (
+            <div key={idx} className="bg-white rounded-lg shadow-md p-6 animate-pulse">
+              <div className="h-4 bg-gray-200 rounded w-1/3 mb-4" />
+              <div className="h-3 bg-gray-100 rounded w-full mb-2" />
+              <div className="h-3 bg-gray-100 rounded w-5/6" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4">
+          <p className="font-semibold">{error}</p>
+          <button
+            onClick={() => fetchPosts({ append: false })}
+            className="mt-2 text-sm text-red-700 underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Create Post */}
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
@@ -167,13 +266,49 @@ const Feed = () => {
                   {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
                 </p>
               </div>
+              {post.user_id === currentUserId && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => handleDelete(post.id)}
+                  className="ml-auto text-sm text-red-600 hover:text-red-700 flex items-center space-x-2"
+                >
+                  <FaTrash />
+                  <span>Delete</span>
+                </motion.button>
+              )}
             </div>
 
             {/* Post Content */}
             <p className="text-gray-800 mb-4">{post.content}</p>
 
-            {/* Post Images */}
-            {post.images && post.images.length > 0 && (
+            {/* Post Media */}
+            {post.media_url && post.media_type === 'image' && (
+              <div className="mb-4">
+                <motion.img
+                  src={resolveImageUrl(post.media_url)}
+                  alt="Post media"
+                  className="w-full rounded-lg"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                />
+              </div>
+            )}
+            {post.media_url && post.media_type === 'video' && (
+              <div className="mb-4">
+                <motion.video
+                  controls
+                  className="w-full rounded-lg"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <source src={resolveImageUrl(post.media_url)} />
+                </motion.video>
+              </div>
+            )}
+            {!post.media_url && post.images && post.images.length > 0 && (
               <div className="mb-4">
                 {post.images.map((image, imgIndex) => (
                   <motion.img
@@ -196,7 +331,7 @@ const Feed = () => {
                 whileTap={{ scale: 0.9 }}
                 onClick={() => handleLike(post.id)}
                 className={`flex items-center space-x-2 ${
-                  post.likes?.includes(user?.id) ? 'text-red-500' : 'text-gray-600 hover:text-red-500'
+                  post.likes?.includes(currentUserId) ? 'text-red-500' : 'text-gray-600 hover:text-red-500'
                 } transition-colors`}
               >
                 <FaHeart />
@@ -274,7 +409,7 @@ const Feed = () => {
         ))}
       </AnimatePresence>
 
-      {posts.length === 0 && (
+      {posts.length === 0 && !loading && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -282,6 +417,11 @@ const Feed = () => {
         >
           No posts yet. Be the first to share something!
         </motion.div>
+      )}
+
+      <div ref={observerRef} className="h-1" />
+      {loadingMore && (
+        <div className="text-center text-sm text-gray-500 py-4">Loading more...</div>
       )}
     </motion.div>
   );

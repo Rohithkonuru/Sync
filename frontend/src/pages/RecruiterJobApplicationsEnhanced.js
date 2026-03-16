@@ -3,8 +3,40 @@ import { jobService } from '../services/api';
 import { FiDownload, FiUser, FiMail, FiPhone, FiMapPin, FiCheckCircle, FiX, FiClock, FiEye, FiFilter } from 'react-icons/fi';
 import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
-import SyncScore from '../components/SyncScore';
-import GrowthScore from '../components/GrowthScore';
+
+const normalizeStatus = (status) => {
+  const value = (status || '').toLowerCase().trim();
+  if (value === 'under_review') return 'seen';
+  if (value === 'in_processing') return 'in-processing';
+  return value || 'submitted';
+};
+
+const getSyncScore = (application) => {
+  const raw = application?.sync_score ?? application?.applicant?.sync_score ?? 0;
+  return Number.isFinite(Number(raw)) ? Math.round(Number(raw)) : 0;
+};
+
+const getAtsScore = (application) => {
+  const direct = application?.ats_score;
+  if (typeof direct === 'number') return Math.round(direct);
+  if (typeof direct?.score === 'number') return Math.round(direct.score);
+  const nested = application?.applicant?.ats_score;
+  if (typeof nested === 'number') return Math.round(nested);
+  if (typeof nested?.score === 'number') return Math.round(nested.score);
+  return 0;
+};
+
+const formatStatusLabel = (status) => {
+  const labels = {
+    submitted: 'Submitted',
+    seen: 'Seen',
+    'in-processing': 'In Process',
+    shortlisted: 'Shortlisted',
+    accepted: 'Accepted',
+    rejected: 'Rejected',
+  };
+  return labels[normalizeStatus(status)] || 'Submitted';
+};
 
 const RecruiterJobApplications = () => {
   const [myJobs, setMyJobs] = useState([]);
@@ -100,18 +132,25 @@ const RecruiterJobApplications = () => {
   const handleStatusUpdate = async (applicationId, newStatus, note = '') => {
     try {
       setUpdatingStatus(true);
-      await jobService.updateApplicationStatus(applicationId, newStatus, note);
+      const normalizedStatus = normalizeStatus(newStatus);
+      await jobService.updateApplicationStatus(applicationId, normalizedStatus, note);
       
       // Update local state
       setApplications(prev => 
         prev.map(app => 
           app.id === applicationId 
-            ? { ...app, status: newStatus }
+            ? { ...app, status: normalizedStatus }
             : app
         )
       );
+
+      setSelectedApplication((prev) => (
+        prev && prev.id === applicationId
+          ? { ...prev, status: normalizedStatus }
+          : prev
+      ));
       
-      toast.success(`Application status updated to ${newStatus}`);
+      toast.success(`Application status updated to ${formatStatusLabel(normalizedStatus)}`);
     } catch (error) {
       toast.error('Failed to update status');
     } finally {
@@ -123,40 +162,52 @@ const RecruiterJobApplications = () => {
     const colors = {
       'submitted': 'bg-blue-100 text-blue-800',
       'seen': 'bg-gray-100 text-gray-800',
+      'in_processing': 'bg-yellow-100 text-yellow-800',
       'in-processing': 'bg-yellow-100 text-yellow-800',
       'shortlisted': 'bg-green-100 text-green-800',
       'accepted': 'bg-emerald-100 text-emerald-800',
       'rejected': 'bg-red-100 text-red-800'
     };
-    return colors[status] || 'bg-gray-100 text-gray-800';
+    return colors[normalizeStatus(status)] || 'bg-gray-100 text-gray-800';
   };
 
   const getStatusIcon = (status) => {
     const icons = {
       'submitted': <FiClock className="w-4 h-4" />,
       'seen': <FiEye className="w-4 h-4" />,
+      'in_processing': <FiClock className="w-4 h-4" />,
       'in-processing': <FiClock className="w-4 h-4" />,
       'shortlisted': <FiCheckCircle className="w-4 h-4" />,
       'accepted': <FiCheckCircle className="w-4 h-4" />,
       'rejected': <FiX className="w-4 h-4" />
     };
-    return icons[status] || <FiClock className="w-4 h-4" />;
+    return icons[normalizeStatus(status)] || <FiClock className="w-4 h-4" />;
   };
 
   const getSortedApplications = () => {
     let filtered = [...applications];
+
+    const getScore = (application, field) => {
+      if (field === 'sync') {
+        return getSyncScore(application);
+      }
+      if (field === 'ats') {
+        return getAtsScore(application);
+      }
+      return 0;
+    };
     
     // Apply filter
     if (filterStatus !== 'all') {
-      filtered = filtered.filter(app => app.status === filterStatus);
+      filtered = filtered.filter(app => normalizeStatus(app.status) === normalizeStatus(filterStatus));
     }
     
     // Apply sort
     switch (sortBy) {
       case 'sync_score':
-        return filtered.sort((a, b) => (b.applicant?.sync_score || 0) - (a.applicant?.sync_score || 0));
+        return filtered.sort((a, b) => getScore(b, 'sync') - getScore(a, 'sync'));
       case 'ats_score':
-        return filtered.sort((a, b) => (b.applicant?.ats_score?.score || 0) - (a.applicant?.ats_score?.score || 0));
+        return filtered.sort((a, b) => getScore(b, 'ats') - getScore(a, 'ats'));
       case 'oldest':
         return filtered.sort((a, b) => new Date(a.applied_at) - new Date(b.applied_at));
       case 'newest':
@@ -166,9 +217,11 @@ const RecruiterJobApplications = () => {
   };
 
   const getApplicantCount = (jobId) => {
-    const count = applications.filter(app => app.job_id === jobId).length;
-    console.log(`📊 Job ${jobId} has ${count} applications`);
-    return count;
+    const job = myJobs.find(j => j.id === jobId);
+    if (Array.isArray(job?.applicants)) {
+      return job.applicants.length;
+    }
+    return applications.filter(app => app.job_id === jobId).length;
   };
 
   if (loading) {
@@ -317,7 +370,7 @@ const RecruiterJobApplications = () => {
                           </h3>
                           <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(application.status)}`}>
                             {getStatusIcon(application.status)}
-                            {application.status}
+                            {formatStatusLabel(application.status)}
                           </span>
                           {!application.is_seen && (
                             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
@@ -350,20 +403,18 @@ const RecruiterJobApplications = () => {
                         <div className="flex items-center gap-6 mb-3">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-gray-700">Sync:</span>
-                            <SyncScore userId={application.applicant?.id} showTooltip={false} compact={true} />
+                            <span className="text-sm font-bold text-blue-600">{getSyncScore(application)}%</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-gray-700">Growth:</span>
-                            <GrowthScore userId={application.applicant?.id} showTooltip={false} compact={true} />
+                            <span className="text-sm font-bold text-purple-600">{application.applicant?.growth_score || 0}</span>
                           </div>
-                          {application.applicant?.ats_score?.score && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-gray-700">ATS:</span>
-                              <span className="text-sm font-bold text-green-600">
-                                {application.applicant.ats_score.score}
-                              </span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">ATS:</span>
+                            <span className="text-sm font-bold text-green-600">
+                              {getAtsScore(application)}%
+                            </span>
+                          </div>
                         </div>
 
                         {/* Applied Date */}
@@ -384,9 +435,9 @@ const RecruiterJobApplications = () => {
                       </button>
                       
                       <div className="flex gap-2">
-                        {application.status !== 'shortlisted' && application.status !== 'accepted' && (
+                        {normalizeStatus(application.status) !== 'shortlisted' && normalizeStatus(application.status) !== 'accepted' && (
                           <button
-                            onClick={() => handleStatusUpdate(application.id, 'shortlisted')}
+                            onClick={() => handleStatusUpdate(application.id, 'shortlisted', 'Candidate shortlisted by recruiter')}
                             disabled={updatingStatus}
                             className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors text-xs font-medium"
                           >
@@ -394,9 +445,9 @@ const RecruiterJobApplications = () => {
                           </button>
                         )}
                         
-                        {application.status !== 'rejected' && (
+                        {normalizeStatus(application.status) !== 'rejected' && (
                           <button
-                            onClick={() => handleStatusUpdate(application.id, 'rejected')}
+                            onClick={() => handleStatusUpdate(application.id, 'rejected', 'Candidate rejected by recruiter')}
                             disabled={updatingStatus}
                             className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors text-xs font-medium"
                           >
@@ -404,9 +455,9 @@ const RecruiterJobApplications = () => {
                           </button>
                         )}
                         
-                        {application.status === 'submitted' && (
+                        {normalizeStatus(application.status) === 'submitted' && (
                           <button
-                            onClick={() => handleStatusUpdate(application.id, 'in-processing')}
+                            onClick={() => handleStatusUpdate(application.id, 'in-processing', 'Application moved to in process')}
                             disabled={updatingStatus}
                             className="px-3 py-1 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-colors text-xs font-medium"
                           >
@@ -469,7 +520,7 @@ const RecruiterJobApplications = () => {
                 <div className="grid grid-cols-3 gap-4">
                   <div className="text-center p-4 border border-gray-200 rounded-lg">
                     <div className="text-2xl font-bold text-blue-600 mb-1">
-                      {selectedApplication.applicant?.sync_score || 0}
+                      {getSyncScore(selectedApplication)}
                     </div>
                     <div className="text-sm text-gray-600">Sync Score</div>
                   </div>
@@ -481,11 +532,18 @@ const RecruiterJobApplications = () => {
                   </div>
                   <div className="text-center p-4 border border-gray-200 rounded-lg">
                     <div className="text-2xl font-bold text-green-600 mb-1">
-                      {selectedApplication.applicant?.ats_score?.score || 0}
+                      {getAtsScore(selectedApplication)}
                     </div>
                     <div className="text-sm text-gray-600">ATS Score</div>
                   </div>
                 </div>
+              </div>
+
+              <div className="mb-6">
+                <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedApplication.status)}`}>
+                  {getStatusIcon(selectedApplication.status)}
+                  {formatStatusLabel(selectedApplication.status)}
+                </span>
               </div>
 
               {/* Cover Letter */}
@@ -525,13 +583,15 @@ const RecruiterJobApplications = () => {
                   Download Resume
                 </button>
                 <button
-                  onClick={() => jobService.updateApplicationStatus(selectedApplication.id, 'shortlisted')}
+                  onClick={() => handleStatusUpdate(selectedApplication.id, 'shortlisted', 'Candidate shortlisted by recruiter')}
+                  disabled={updatingStatus || normalizeStatus(selectedApplication.status) === 'shortlisted' || normalizeStatus(selectedApplication.status) === 'accepted'}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
                   Shortlist
                 </button>
                 <button
-                  onClick={() => jobService.updateApplicationStatus(selectedApplication.id, 'rejected')}
+                  onClick={() => handleStatusUpdate(selectedApplication.id, 'rejected', 'Candidate rejected by recruiter')}
+                  disabled={updatingStatus || normalizeStatus(selectedApplication.status) === 'rejected'}
                   className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                 >
                   Reject

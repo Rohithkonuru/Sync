@@ -15,9 +15,38 @@ from app.services.socket_manager import broadcast_post
 
 router = APIRouter()
 
+
+def _as_list(value):
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _count_items(value):
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
+
 def post_to_dict(post: dict) -> dict:
     if not post:
         return None
+    media_url = post.get("media_url")
+    media_type = post.get("media_type")
+    if not media_url and post.get("images"):
+        media_url = post["images"][0]
+        media_type = media_type or "image"
+    elif media_url and not media_type:
+        media_url_lower = media_url.lower()
+        if media_url_lower.endswith((".mp4", ".mov", ".webm", ".avi", ".mkv")):
+            media_type = "video"
+        else:
+            media_type = "image"
+
+    likes = _as_list(post.get("likes", []))
+    comments = _as_list(post.get("comments", []))
+
     return {
         "id": str(post["_id"]),
         "user_id": post.get("user_id"),
@@ -27,11 +56,15 @@ def post_to_dict(post: dict) -> dict:
         "user_headline": post.get("user_headline", ""),
         "content": post.get("content", ""),
         "images": post.get("images", []),
-        "likes": post.get("likes", []),
-        "comments": post.get("comments", []),
+        "media_url": media_url,
+        "media_type": media_type,
+        "likes": likes,
+        "comments": comments,
+        "likes_count": _count_items(post.get("likes", [])),
+        "comments_count": _count_items(post.get("comments", [])),
         "shares": post.get("shares", 0),
-        "created_at": post.get("created_at"),
-        "updated_at": post.get("updated_at")
+        "created_at": post.get("created_at") or datetime.utcnow(),
+        "updated_at": post.get("updated_at") or post.get("created_at") or datetime.utcnow()
     }
 
 async def enrich_post_with_user_data(post: dict) -> dict:
@@ -52,69 +85,40 @@ async def upload_post_image(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload an image for a post"""
-    # Validate file type
-    if not file.content_type.startswith("image/"):
+    """Upload media (image/video) for a post"""
+    content_type = file.content_type or ""
+    if not (content_type.startswith("image/") or content_type.startswith("video/")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only images are allowed."
+            detail="Invalid file type. Only images or videos are allowed."
         )
-    
-    # Validate file size (max 5MB)
-    max_size = 5 * 1024 * 1024  # 5MB
+
+    # Validate file size (images <=5MB, videos <=25MB)
     file_content = await file.read()
+    max_size = 25 * 1024 * 1024 if content_type.startswith("video/") else 5 * 1024 * 1024
     if len(file_content) > max_size:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File too large. Maximum size is 5MB."
+            detail="File too large. Maximum size exceeded."
         )
-    
+
     try:
-        # Generate unique filename
         unique_filename = f"post_{uuid.uuid4()}_{file.filename}"
         upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
         os.makedirs(upload_dir, exist_ok=True)
         file_path = os.path.join(upload_dir, unique_filename)
-        
-        # Save file
+
         with open(file_path, "wb") as buffer:
             buffer.write(file_content)
-            
-        return {"url": f"/uploads/{unique_filename}"}
+
+        media_type = "video" if content_type.startswith("video/") else "image"
+        return {"url": f"/uploads/{unique_filename}", "media_type": media_type}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload image: {str(e)}"
+            detail=f"Failed to upload media: {str(e)}"
         )
 
-@router.delete("/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_post(post_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete a post (only by the owner)"""
-    try:
-        db = get_database()
-        
-        # Check if post exists
-        post = await db.posts.find_one({"_id": ObjectId(post_id)})
-        if not post:
-            raise HTTPException(status_code=404, detail="Post not found")
-        
-        # Check ownership
-        if post["user_id"] != str(current_user["_id"]):
-            raise HTTPException(status_code=403, detail="Not authorized to delete this post")
-            
-        # Delete post
-        await db.posts.delete_one({"_id": ObjectId(post_id)})
-        
-        # Optional: Delete associated notifications, comments, etc.
-        
-        return None
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete post: {str(e)}"
-        )
 
 @router.post("", response_model=PostResponse)
 async def create_post(post_data: PostCreate, current_user: dict = Depends(get_current_user)):
@@ -131,6 +135,8 @@ async def create_post(post_data: PostCreate, current_user: dict = Depends(get_cu
             "user_headline": current_user.get("headline", ""),
             "content": post_data.content,
             "images": post_data.images,
+            "media_url": post_data.media_url,
+            "media_type": post_data.media_type,
             "likes": [],
             "comments": [],
             "shares": 0,
@@ -212,8 +218,8 @@ async def get_posts(
     if sort_by == "relevance":
         for post in posts:
             # Relevance score = (likes * 2) + comments + (shares * 3) + recency_factor
-            likes_count = len(post.get("likes", []))
-            comments_count = len(post.get("comments", []))
+            likes_count = _count_items(post.get("likes", []))
+            comments_count = _count_items(post.get("comments", []))
             shares_count = post.get("shares", 0)
 
             # Recency factor: more recent = higher score (decay over 7 days)
@@ -294,6 +300,16 @@ async def like_post(
                 related_user_id=user_id,
                 related_post_id=post_id
             )
+        # record like activity
+        try:
+            from app.services.sync_score import SyncScoreService
+            from app.services.growth_score import get_growth_score_service
+            sync_service = SyncScoreService()
+            growth_service = get_growth_score_service()
+            await sync_service.record_activity(user_id, "like")
+            await growth_service.record_activity(user_id, "like")
+        except Exception:
+            pass
     
     # Return updated post
     updated_post = await db.posts.find_one({"_id": ObjectId(post_id)})
@@ -338,6 +354,16 @@ async def add_comment(
             related_user_id=str(current_user["_id"]),
             related_post_id=post_id
         )
+    # record comment activity
+    try:
+        from app.services.sync_score import SyncScoreService
+        from app.services.growth_score import get_growth_score_service
+        sync_service = SyncScoreService()
+        growth_service = get_growth_score_service()
+        await sync_service.record_activity(str(current_user["_id"]), "comment")
+        await growth_service.record_activity(str(current_user["_id"]), "comment")
+    except Exception:
+        pass
     
     # Return updated post
     updated_post = await db.posts.find_one({"_id": ObjectId(post_id)})
@@ -457,6 +483,62 @@ async def get_saved_posts(
     
     return [post_to_dict(post) for post in posts]
 
+@router.get("/saved/{user_id}", response_model=List[PostResponse])
+async def get_saved_posts_by_user(
+    user_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get saved posts for the current authenticated user.
+
+    The path includes user_id to support frontend routing needs, but data is
+    always scoped to the authenticated user for safety.
+    """
+    db = get_database()
+    _ = user_id
+    saved_post_ids = current_user.get("saved_posts", [])
+
+    if not saved_post_ids:
+        return []
+
+    valid_ids = [ObjectId(pid) for pid in saved_post_ids if ObjectId.is_valid(pid)]
+    if not valid_ids:
+        return []
+
+    posts = await db.posts.find({
+        "_id": {"$in": valid_ids}
+    }).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+
+    return [post_to_dict(post) for post in posts]
+
+@router.get("/network/{user_id}", response_model=List[PostResponse])
+async def get_network_feed(
+    user_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get network-only posts (connections + self) sorted by recency."""
+    db = get_database()
+    _ = user_id
+
+    connections = current_user.get("connections", [])
+    owner_id = str(current_user.get("_id"))
+    if owner_id not in connections:
+        connections.append(owner_id)
+
+    posts = await db.posts.find({
+        "user_id": {"$in": connections}
+    }).sort("created_at", -1).skip(skip).limit(limit).to_list(length=limit)
+
+    enriched_posts = []
+    for post in posts:
+        enriched_post = await enrich_post_with_user_data(post)
+        enriched_posts.append(enriched_post)
+
+    return [post_to_dict(post) for post in enriched_posts]
+
 @router.get("/feed", response_model=List[PostResponse])
 async def get_feed(
     skip: int = Query(0, ge=0),
@@ -486,15 +568,15 @@ async def get_feed(
         
         # Filter by engagement (likes + comments + shares)
         for post in recommended_posts:
-            engagement = len(post.get("likes", [])) + len(post.get("comments", [])) + post.get("shares", 0)
+            engagement = _count_items(post.get("likes", [])) + _count_items(post.get("comments", [])) + post.get("shares", 0)
             if engagement >= 5:  # Only show posts with at least 5 total engagements
                 all_posts.append(post)
     
     # Calculate relevance score for each post
     if sort_by == "relevance":
         for post in all_posts:
-            likes_count = len(post.get("likes", []))
-            comments_count = len(post.get("comments", []))
+            likes_count = _count_items(post.get("likes", []))
+            comments_count = _count_items(post.get("comments", []))
             shares_count = post.get("shares", 0)
             
             # Recency factor: more recent = higher score (decay over 7 days)

@@ -6,6 +6,7 @@ import GrowthScore from './GrowthScore';
 
 const ProfileCard = () => {
   const { user } = useAuth();
+  const profileUserId = user?.id || user?._id;
 
   const getUserTypeLabel = () => {
     switch (user?.user_type) {
@@ -134,7 +135,7 @@ const ProfileCard = () => {
               </div>
             </div>
           </div>
-          <SyncScore userId={user?.id} compact={true} />
+          <SyncScore userId={profileUserId} compact={true} />
         </div>
 
         {/* Growth Score - Self View Only */}
@@ -149,7 +150,7 @@ const ProfileCard = () => {
               </div>
             </div>
           </div>
-          <GrowthScore userId={user?.id} compact={true} />
+          <GrowthScore userId={profileUserId} compact={true} />
         </div>
       </div>
     </div>

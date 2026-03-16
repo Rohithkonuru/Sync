@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { FiImage, FiX, FiSend, FiVideo, FiCalendar, FiFileText } from 'react-icons/fi';
+import { FiImage, FiX, FiSend, FiVideo } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { postService } from '../services/api';
 import { getErrorMessage } from '../utils/errorHelpers';
@@ -115,6 +115,19 @@ const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLengt
         }
       }
 
+      let uploadedVideoUrl = null;
+      if (videos.length > 0 && videos[0]?.file) {
+        try {
+          const videoResponse = await postService.uploadImage(videos[0].file);
+          uploadedVideoUrl = videoResponse.url;
+        } catch (error) {
+          console.error('Failed to upload video:', error);
+          toast.error('Failed to upload video');
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
       // Build post data based on mode
       const postData = {
         content: content.trim(),
@@ -130,6 +143,8 @@ const PostComposer = ({ onSubmit, placeholder = "What's on your mind?", maxLengt
       } else if (mode === 'video') {
         postData.hasVideo = videos.length > 0;
         postData.videoName = videos[0]?.name;
+        postData.media_url = uploadedVideoUrl;
+        postData.media_type = 'video';
       }
 
       await onSubmit(postData);

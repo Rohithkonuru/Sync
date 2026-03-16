@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { FiTrendingUp, FiInfo } from 'react-icons/fi';
 import { useAuth } from '../context/AuthContext';
+import { analyticsService } from '../services/api';
 
 const SyncScore = ({ userId, showTooltip = true, compact = false, refreshTrigger = 0 }) => {
   const { user } = useAuth();
   const [syncScore, setSyncScore] = useState(null);
   const [loading, setLoading] = useState(true);
+  const viewerId = user?.id || user?._id;
 
   // Check if current user can view this sync score
   const canViewSyncScore = () => {
     if (!user) return false;
     // User can always see their own sync score
-    if (userId === user.id) return true;
+    if (String(userId) === String(viewerId)) return true;
     // Recruiters can see anyone's sync score
     if (user.user_type === 'recruiter') return true;
     return false;
@@ -24,22 +26,17 @@ const SyncScore = ({ userId, showTooltip = true, compact = false, refreshTrigger
     }
 
     try {
-      const response = await fetch(`/api/users/${userId}/sync-score`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const data = await analyticsService.getUserSyncScore(userId);
+      setSyncScore({
+        ...data,
+        score: data?.score ?? data?.sync_score ?? 0,
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setSyncScore(data);
-      }
     } catch (error) {
       console.error('Failed to fetch sync score:', error);
     } finally {
       setLoading(false);
     }
-  }, [userId, user]);
+  }, [userId, user, viewerId]);
 
   useEffect(() => {
     fetchSyncScore();
@@ -73,7 +70,7 @@ const SyncScore = ({ userId, showTooltip = true, compact = false, refreshTrigger
     );
   }
 
-  if (!syncScore || !syncScore.score) {
+  if (!syncScore || syncScore.score === null || syncScore.score === undefined) {
     return null;
   }
 

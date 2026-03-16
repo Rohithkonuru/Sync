@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { jobService, postService } from '../../services/api';
+import { useFeed } from '../../context/FeedContext';
+import { jobService, postService, userService, certificationService } from '../../services/api';
+import { getDashboardFeed } from '../../services/feedService';
+import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge, ProgressBar } from '../ui';
-import FeedCard from '../FeedCard';
+import FeedCard from '../common/FeedCard';
 import { 
   FiBriefcase, 
   FiBookOpen, 
@@ -35,7 +38,8 @@ import ProfileCard from '../ProfileCard';
  * Focused on: Learning, Career Preparation, Internships
  */
 const StudentDashboardEnhanced = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
+  const { getFeed, setFeed, removePost, upsertPost } = useFeed();
   const navigate = useNavigate();
   
   // State - moved to top for ESLint recognition
@@ -50,8 +54,14 @@ const StudentDashboardEnhanced = () => {
   const [uploadingResume, setUploadingResume] = useState(false);
   const [showCreatePostModal, setShowCreatePostModal] = useState(false);
   const [postMode, setPostMode] = useState('text');
+  const [showCertificateModal, setShowCertificateModal] = useState(false);
+  const [certificateTitle, setCertificateTitle] = useState('');
+  const [certificateIssuer, setCertificateIssuer] = useState('');
+  const [certificateFile, setCertificateFile] = useState(null);
+  const [uploadingCertificate, setUploadingCertificate] = useState(false);
   const resumeInputRef = React.useRef(null);
   const postComposerRef = React.useRef(null);
+  const certificateInputRef = React.useRef(null);
 
   const resolveImageUrl = (url) => {
     if (!url) return url;
@@ -76,22 +86,109 @@ const StudentDashboardEnhanced = () => {
 
     setUploadingResume(true);
     try {
-      // Mock ATS score calculation
-      setTimeout(() => {
-        const mockScore = Math.floor(Math.random() * 30) + 70; // 70-100 range
-        setAtsScore({
-          score: mockScore,
-          verified: true,
-          last_updated: new Date().toISOString()
-        });
-        setLoadingAtsScore(false);
-        setUploadingResume(false);
-        toast.success('Resume analyzed successfully!');
-      }, 2000);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      let response;
+      try {
+        response = await userService.uploadResume(formData);
+      } catch {
+        response = await userService.uploadResumeLegacy(formData);
+      }
+
+      if (response?.ats_score) {
+        setAtsScore(response.ats_score);
+      }
+
+      if (response?.resume_url) {
+        updateUser({ ...user, resume_url: response.resume_url });
+      }
+
+      toast.success('Resume uploaded successfully');
     } catch (error) {
       console.error('Resume upload error:', error);
-      toast.error('Failed to analyze resume');
+      toast.error(error?.response?.data?.detail || 'Failed to upload resume');
+    } finally {
       setUploadingResume(false);
+      if (resumeInputRef.current) {
+        resumeInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleStartFreeTrial = async () => {
+    try {
+      await userService.updateProfile({ premium_status: true });
+      updateUser({ ...user, premium_status: true });
+      toast.success('Premium trial started!');
+    } catch (error) {
+      console.error('Premium update error:', error);
+      toast.error(error?.response?.data?.detail || 'Failed to start premium trial');
+    }
+  };
+
+  const handleOpenCertificateModal = () => {
+    setCertificateTitle('');
+    setCertificateIssuer('');
+    setCertificateFile(null);
+    setShowCertificateModal(true);
+  };
+
+  const handleCertificateUpload = async (e) => {
+    e.preventDefault();
+    if (!certificateTitle.trim() || !certificateFile) {
+      toast.error('Certificate title and file are required');
+      return;
+    }
+
+    setUploadingCertificate(true);
+    try {
+      const formData = new FormData();
+      formData.append('title', certificateTitle.trim());
+      formData.append('issuer', certificateIssuer.trim());
+      formData.append('file', certificateFile);
+
+      const certificateEntry = {
+        id: Date.now(),
+        name: certificateTitle.trim(),
+        issuer: certificateIssuer.trim() || 'Uploaded',
+        date: new Date().getFullYear().toString(),
+
+      };
+
+      try {
+        await certificationService.uploadCertificate(formData);
+      } catch {
+        // Fallback for environments where dedicated certificate endpoint is not available
+        await userService.updateProfile({
+          certifications: [
+            ...(user?.certifications || []),
+            {
+              name: certificateEntry.name,
+              issuer: certificateEntry.issuer,
+              date: certificateEntry.date,
+            },
+          ],
+        });
+      }
+
+      setCertifications((prev) => [certificateEntry, ...prev]);
+
+      setShowCertificateModal(false);
+      toast.success('Certificate uploaded successfully');
+    } catch (error) {
+      console.error('Certificate upload error:', error);
+      toast.error(error?.response?.data?.detail || 'Failed to upload certificate');
+    } finally {
+      setUploadingCertificate(false);
+    }
+  };
+
+  const openNewsArticle = (url) => {
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      toast.error('Unable to open article');
     }
   };
 
@@ -188,6 +285,26 @@ const StudentDashboardEnhanced = () => {
   const [certifications, setCertifications] = useState([
     { id: 1, name: 'AWS Cloud Practitioner', date: '2023', issuer: 'Amazon' }
   ]);
+  const newsItems = [
+    {
+      title: 'Tech Giants Announce AI Internships',
+      source: 'Silicon Valley Times',
+      time: '2h ago',
+      url: 'https://techcrunch.com/',
+    },
+    {
+      title: 'Student Startup Wins $100K Funding',
+      source: 'TechCrunch',
+      time: '4h ago',
+      url: 'https://techcrunch.com/startups/',
+    },
+    {
+      title: 'Remote Work Trends for 2024',
+      source: 'Business Insider',
+      time: '6h ago',
+      url: 'https://www.businessinsider.com/',
+    },
+  ];
 
   useEffect(() => {
     loadData();
@@ -201,14 +318,14 @@ const StudentDashboardEnhanced = () => {
       const [internshipData, applicationData, postsData] = await Promise.all([
         jobService.getJobs({ job_type: 'internship', limit: 5 }).catch(() => []),
         jobService.getApplications({ limit: 5 }).catch(() => []),
-        postService.getPosts({ limit: 10, include_demo: true }).catch(() => [])
+        getDashboardFeed({ limit: 10, include_demo: true }).catch(() => getFeed('all'))
       ]);
 
-      setInternships(internshipData);
-      setApplications(applicationData);
+      setInternships(Array.isArray(internshipData) ? internshipData : []);
+      setApplications(Array.isArray(applicationData) ? applicationData : []);
       
       // Add demo images to some posts for better UX
-      const postsWithImages = postsData.map((post, index) => {
+      const postsWithImages = (Array.isArray(postsData) ? postsData : []).map((post, index) => {
         if (index % 3 === 0 && !post.images) { // Add images to every 3rd post
           return {
             ...post,
@@ -222,6 +339,7 @@ const StudentDashboardEnhanced = () => {
       });
       
       setFeedPosts(postsWithImages);
+      setFeed('all', postsWithImages);
       
     } catch (error) {
       console.error('Error loading student dashboard:', error);
@@ -250,6 +368,8 @@ const StudentDashboardEnhanced = () => {
 
   const getStatusColor = (status) => {
     switch(status?.toLowerCase()) {
+      case 'submitted': return 'text-blue-600 bg-blue-50';
+      case 'seen': return 'text-indigo-600 bg-indigo-50';
       case 'shortlisted': return 'text-green-600 bg-green-50';
       case 'rejected': return 'text-red-600 bg-red-50';
       case 'accepted': return 'text-green-700 bg-green-100';
@@ -343,29 +463,33 @@ const StudentDashboardEnhanced = () => {
                 className="hidden"
                 disabled={uploadingResume}
               />
-              <Button 
-                variant="white" 
-                onClick={() => resumeInputRef.current?.click()}
-                disabled={uploadingResume}
-                className="flex items-center gap-2"
-              >
-                {uploadingResume ? (
-                  <>
-                    <FiRefreshCw className="animate-spin" /> Uploading...
-                  </>
-                ) : (
-                  <>
-                    <FiUpload /> {atsScore ? 'Update Resume' : 'Upload Resume'}
-                  </>
-                )}
-              </Button>
-              <Button 
-                variant="outline" 
-                className="text-blue-600 border-blue-600 hover:bg-blue-50"
-                onClick={() => navigate('/profile')}
-              >
-                Complete Profile
-              </Button>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button 
+                  variant="white" 
+                  onClick={() => resumeInputRef.current?.click()}
+                  disabled={uploadingResume}
+                  className="flex items-center gap-2"
+                >
+                  {uploadingResume ? (
+                    <>
+                      <FiRefreshCw className="animate-spin" /> Uploading...
+                    </>
+                  ) : (
+                    <>
+                      <FiUpload /> {atsScore ? 'Update Resume' : 'Upload Resume'}
+                    </>
+                  )}
+                </Button>
+              </motion.div>
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <Button 
+                  variant="outline" 
+                  className="text-blue-600 border-blue-600 hover:bg-blue-50"
+                  onClick={() => navigate('/profile')}
+                >
+                  Complete Profile
+                </Button>
+              </motion.div>
             </div>
           </div>
         </motion.div>
@@ -381,7 +505,13 @@ const StudentDashboardEnhanced = () => {
           <div className="lg:col-span-3 space-y-4">
             
             {/* Profile Card */}
-            <motion.div variants={itemVariants}>
+            <motion.div
+              variants={itemVariants}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              onClick={() => navigate('/profile')}
+              className="cursor-pointer"
+            >
               <ProfileCard />
             </motion.div>
             
@@ -392,7 +522,11 @@ const StudentDashboardEnhanced = () => {
                 <h3 className="font-bold text-gray-900">Connections</h3>
                 <p className="text-2xl font-bold text-blue-600 mt-1">247</p>
                 <p className="text-sm text-gray-500">Grow your network</p>
-                <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/connections')}>Find Connections</Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/network')}>
+                    Find Connections
+                  </Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -404,7 +538,9 @@ const StudentDashboardEnhanced = () => {
                 <div className="text-2xl mb-2">⭐</div>
                 <h3 className="font-bold text-gray-900 text-sm mb-1">Try Premium Free</h3>
                 <p className="text-xs text-gray-600 mb-3">Get access to exclusive internships and career coaching</p>
-                <Button size="sm" className="bg-amber-600 text-white w-full" onClick={() => toast.success('Premium trial started!')}>Start Free Trial</Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button size="sm" className="bg-amber-600 text-white w-full" onClick={handleStartFreeTrial}>Start Free Trial</Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -416,15 +552,17 @@ const StudentDashboardEnhanced = () => {
                 <FiBookmark className="text-blue-500 flex-shrink-0" /> Saved Items
               </h3>
               <div className="space-y-2">
-                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer">
+                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer" onClick={() => navigate('/saved')}>
                   <p className="font-medium">React Development Guide</p>
                   <p className="text-xs text-gray-500">Saved 2 days ago</p>
                 </div>
-                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer">
+                <div className="text-sm text-gray-700 hover:bg-gray-50 p-2 rounded cursor-pointer" onClick={() => navigate('/saved')}>
                   <p className="font-medium">Interview Tips 2024</p>
                   <p className="text-xs text-gray-500">Saved 1 week ago</p>
                 </div>
-                <Button variant="ghost" size="sm" className="text-blue-600 w-full" onClick={() => navigate('/saved')}>View All Saved</Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button variant="ghost" size="sm" className="text-blue-600 w-full" onClick={() => navigate('/saved')}>View All Saved</Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -477,7 +615,7 @@ const StudentDashboardEnhanced = () => {
                 <h3 className="font-semibold text-gray-900 flex items-center gap-2">
                   <FiAward className="text-yellow-500 flex-shrink-0" /> Certifications
                 </h3>
-                <button className="text-blue-600 hover:text-blue-700 text-sm" onClick={scrollToPostComposer}>
+                <button className="text-blue-600 hover:text-blue-700 text-sm" onClick={handleOpenCertificateModal}>
                   <FiPlus />
                 </button>
               </div>
@@ -493,9 +631,11 @@ const StudentDashboardEnhanced = () => {
                     </div>
                   </div>
                 ))}
-                <Button variant="ghost" size="sm" fullWidth className="text-gray-500 text-xs border-dashed border">
-                  + Upload Certificate
-                </Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button variant="ghost" size="sm" fullWidth className="text-gray-500 text-xs border-dashed border" onClick={handleOpenCertificateModal}>
+                    + Upload Certificate
+                  </Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -516,46 +656,56 @@ const StudentDashboardEnhanced = () => {
                     <FiUser className="text-gray-500" />
                   )}
                 </div>
-                <button 
+                <motion.button 
                   onClick={() => setShowCreatePostModal(true)}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className="flex-1 text-left text-gray-500 bg-gray-100 rounded-full px-4 py-2 hover:bg-gray-200 transition-colors"
                 >
                   Start a post
-                </button>
+                </motion.button>
               </div>
               <div className="flex items-center justify-around px-3 pb-3 border-t border-gray-100">
-                <button 
+                <motion.button 
                   type="button"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
                   onClick={() => { setPostMode('text'); setShowCreatePostModal(true); }}
                 >
                   <FiUpload className="w-5 h-5" />
                   <span className="text-sm">Photo</span>
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
                   type="button"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
                   onClick={() => { setPostMode('video'); setShowCreatePostModal(true); }}
                 >
                   <FiVideo className="w-5 h-5" />
                   <span className="text-sm">Video</span>
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
                   type="button"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
                   onClick={() => { setPostMode('event'); setShowCreatePostModal(true); }}
                 >
                   <FiCalendar className="w-5 h-5" />
                   <span className="text-sm">Event</span>
-                </button>
-                <button 
+                </motion.button>
+                <motion.button 
                   type="button"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   className="flex items-center gap-2 text-gray-600 hover:text-blue-600 p-2 hover:bg-blue-50 rounded transition-colors" 
                   onClick={() => { setPostMode('article'); setShowCreatePostModal(true); }}
                 >
                   <FiEdit2 className="w-5 h-5" />
                   <span className="text-sm">Write article</span>
-                </button>
+                </motion.button>
               </div>
             </Card>
             </motion.div>
@@ -565,7 +715,16 @@ const StudentDashboardEnhanced = () => {
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Learning Progress</h3>
-                <a href="#" className="text-sm text-blue-600 hover:underline">View Library</a>
+                <a
+                  href="/saved"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/saved');
+                  }}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  View Library
+                </a>
               </div>
               <div className="space-y-4">
                 {learningResources.map((res) => (
@@ -591,10 +750,23 @@ const StudentDashboardEnhanced = () => {
                       <FeedCard
                         key={post.id || post._id}
                         post={post}
-                        currentUserId={user._id}
-                        onPostUpdate={(postId) => {
-                          setFeedPosts(prev => prev.filter(p => (p.id || p._id) !== postId));
-                          toast.success('Post deleted');
+                        currentUserId={user?._id || user?.id}
+                        onPostUpdate={(postUpdate) => {
+                          if (typeof postUpdate === 'string') {
+                            removePost(postUpdate);
+                            setFeedPosts((prev) => prev.filter((p) => (p.id || p._id) !== postUpdate));
+                            toast.success('Post deleted');
+                            return;
+                          }
+
+                          if (postUpdate?.id || postUpdate?._id) {
+                            upsertPost('all', postUpdate);
+                            setFeedPosts((prev) => prev.map((p) =>
+                              String(p.id || p._id) === String(postUpdate.id || postUpdate._id)
+                                ? { ...p, ...postUpdate }
+                                : p
+                            ));
+                          }
                         }}
                       />
                     ))
@@ -624,18 +796,17 @@ const StudentDashboardEnhanced = () => {
             <Card>
               <h3 className="font-bold text-gray-900 mb-4">Today's news and views</h3>
               <div className="space-y-3">
-                <div className="border-b border-gray-100 pb-3">
-                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Tech Giants Announce AI Internships</h4>
-                  <p className="text-xs text-gray-500 mt-1">Silicon Valley Times • 2h ago</p>
-                </div>
-                <div className="border-b border-gray-100 pb-3">
-                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Student Startup Wins $100K Funding</h4>
-                  <p className="text-xs text-gray-500 mt-1">TechCrunch • 4h ago</p>
-                </div>
-                <div className="pb-3">
-                  <h4 className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer">Remote Work Trends for 2024</h4>
-                  <p className="text-xs text-gray-500 mt-1">Business Insider • 6h ago</p>
-                </div>
+                {newsItems.map((item, idx) => (
+                  <div key={item.title} className={`${idx < newsItems.length - 1 ? 'border-b border-gray-100 pb-3' : 'pb-3'}`}>
+                    <h4
+                      className="font-semibold text-sm text-gray-900 hover:text-blue-600 cursor-pointer"
+                      onClick={() => openNewsArticle(item.url)}
+                    >
+                      {item.title}
+                    </h4>
+                    <p className="text-xs text-gray-500 mt-1">{item.source} • {item.time}</p>
+                  </div>
+                ))}
               </div>
             </Card>
             </motion.div>
@@ -647,7 +818,9 @@ const StudentDashboardEnhanced = () => {
                 <div className="text-3xl mb-2">💼</div>
                 <h3 className="font-bold text-gray-900 text-sm mb-2">Your dream job is closer than you think</h3>
                 <p className="text-xs text-gray-600 mb-4">Top companies are hiring students like you</p>
-                <Button size="sm" className="bg-blue-600 text-white w-full" onClick={() => navigate('/jobs')}>See jobs</Button>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Button size="sm" className="bg-blue-600 text-white w-full" onClick={() => navigate('/jobs')}>See jobs</Button>
+                </motion.div>
               </div>
             </Card>
             </motion.div>
@@ -657,7 +830,16 @@ const StudentDashboardEnhanced = () => {
             <Card>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Internships</h3>
-                <a href="#" className="text-sm text-blue-600 hover:underline">View All</a>
+                <a
+                  href="/jobs?type=internship"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/jobs?type=internship');
+                  }}
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  View All
+                </a>
               </div>
               <div className="space-y-4">
                 {internships.length > 0 ? internships.map((job) => (
@@ -683,26 +865,30 @@ const StudentDashboardEnhanced = () => {
                 <h3 className="font-semibold text-gray-900">My Applications</h3>
               </div>
               <div className="space-y-3">
-                {applications.length > 0 ? applications.map((app) => {
-                  console.log('Application data:', app);
-                  return (
-                    <div key={app.id} className="flex items-start p-3 rounded hover:bg-gray-50 border border-gray-100">
-                      <div className="w-full">
-                        <p className="text-xs text-gray-600 truncate mb-1">{app.job?.title || 'Job Application'}</p>
-                        <p className="text-sm font-semibold text-black mb-2 break-words">{app.job?.company_name || 'Company Name Not Available'}</p>
+                {applications.length > 0 ? applications.map((app) => (
+                  <div key={app.id} className="flex items-start p-3 rounded hover:bg-gray-50 border border-gray-100">
+                    <div className="w-full">
+                      <p className="text-xs text-gray-600 truncate mb-1">{app.job_title || app.job?.title || 'Job Application'}</p>
+                      <p className="text-sm font-semibold text-black mb-2 break-words">{app.company_name || app.job?.company_name || 'Company'}</p>
+                      <div className="flex items-center justify-between">
                         <span className={`text-[10px] font-semibold px-2 py-1 rounded-full inline-block ${getStatusColor(app.status)}`}>
-                          {app.status}
+                          {(app.status || 'submitted').toLowerCase()}
+                        </span>
+                        <span className="text-[10px] text-gray-500">
+                          {app.created_at ? formatDistanceToNow(new Date(app.created_at), { addSuffix: true }) : ''}
                         </span>
                       </div>
                     </div>
-                  );
-                }) : (
+                  </div>
+                )) : (
                   <div className="text-center py-6">
                     <div className="bg-gray-50 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-2">
                       <FiFileText className="text-gray-400" />
                     </div>
                     <p className="text-sm text-black">No active applications</p>
-                    <Button variant="text" size="sm" className="text-blue-600 mt-1" onClick={() => navigate('/jobs')}>Start Applying</Button>
+                    <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                      <Button variant="text" size="sm" className="text-blue-600 mt-1" onClick={() => navigate('/jobs')}>Start Applying</Button>
+                    </motion.div>
                   </div>
                 )}
               </div>
@@ -736,9 +922,20 @@ const StudentDashboardEnhanced = () => {
                 mode={postMode}
                 onSubmit={async (postData) => {
                   try {
-                    console.log('Creating post with data:', postData);
-                    const newPost = await postService.createPost(postData);
-                    console.log('Post created response:', newPost);
+                    const payload = {
+                      ...postData,
+                      user_id: user?._id,
+                      post_type: postMode,
+                      media_url: postData?.media_url || postData?.video_url || postData?.image_url || postData?.images?.[0],
+                      created_at: new Date().toISOString(),
+                    };
+
+                    let newPost;
+                    try {
+                      newPost = await postService.createPost(payload);
+                    } catch {
+                      newPost = await postService.createPostV2(payload);
+                    }
                     
                     // Ensure the post has all required fields for display
                     const processedPost = {
@@ -748,6 +945,8 @@ const StudentDashboardEnhanced = () => {
                       user_picture: newPost.user_picture || user.profile_picture,
                       content: newPost.content,
                       images: newPost.images || [],
+                      media_url: newPost.media_url || postData?.media_url || postData?.images?.[0],
+                      media_type: newPost.media_type || (postMode === 'video' ? 'video' : (postData?.images?.length ? 'image' : undefined)),
                       likes: newPost.likes || [],
                       comments: newPost.comments || [],
                       shares: newPost.shares || 0,
@@ -755,18 +954,59 @@ const StudentDashboardEnhanced = () => {
                       updated_at: newPost.updated_at || new Date().toISOString()
                     };
                     
-                    setFeedPosts(prev => [processedPost, ...prev]);
+                    setFeedPosts(prev => {
+                      const next = [processedPost, ...prev];
+                      setFeed('all', next);
+                      return next;
+                    });
                     setShowCreatePostModal(false);
                     setPostMode('text');
-                    toast.success('Post created successfully!');
+                    toast.success(TOAST_MESSAGES.POST_CREATED);
                   } catch (error) {
                     console.error('Error creating post:', error);
-                    console.error('Error details:', error.response?.data || error.message);
                     toast.error(error.response?.data?.detail || 'Failed to create post');
                   }
                 }}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {showCertificateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-lg w-full">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-semibold">Upload Certificate</h3>
+              <button onClick={() => setShowCertificateModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <form onSubmit={handleCertificateUpload} className="p-4 space-y-3">
+              <input
+                value={certificateTitle}
+                onChange={(e) => setCertificateTitle(e.target.value)}
+                placeholder="Certificate title"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+              />
+              <input
+                value={certificateIssuer}
+                onChange={(e) => setCertificateIssuer(e.target.value)}
+                placeholder="Issuer"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2"
+              />
+              <input
+                ref={certificateInputRef}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg"
+                onChange={(e) => setCertificateFile(e.target.files?.[0] || null)}
+                className="w-full"
+              />
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="ghost" onClick={() => setShowCertificateModal(false)}>Cancel</Button>
+                <Button type="submit" disabled={uploadingCertificate}>
+                  {uploadingCertificate ? 'Uploading...' : 'Upload'}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

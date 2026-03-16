@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useFeed } from '../../context/FeedContext';
 import { jobService, postService } from '../../services/api';
+import { getDashboardFeed } from '../../services/feedService';
+import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge, ProgressBar, Input } from '../ui';
-import FeedCard from '../FeedCard';
+import FeedCard from '../common/FeedCard';
 import { 
   FiBriefcase, 
   FiSearch, 
@@ -31,6 +34,7 @@ import PostComposer from '../PostComposer';
  */
 const JobSeekerDashboardEnhanced = () => {
   const { user } = useAuth();
+  const { getFeed, setFeed, removePost, upsertPost } = useFeed();
   const navigate = useNavigate();
   
   // State
@@ -128,13 +132,15 @@ const JobSeekerDashboardEnhanced = () => {
         jobService.getJobs({ limit: 5 }).catch(() => []),
         jobService.getApplications({ limit: 5 }).catch(() => []),
         jobService.getSavedJobs?.().catch(() => []) || [], // Safe call if method exists
-        postService.getPosts({ limit: 10, include_demo: true }).catch(() => [])
+        getDashboardFeed({ limit: 10, include_demo: true }).catch(() => getFeed('all'))
       ]);
 
       setRecommendedJobs(jobsData);
       setApplications(appsData);
       setSavedJobs(savedData);
-      setFeedPosts(postsData);
+      const normalizedPosts = Array.isArray(postsData) ? postsData : [];
+      setFeedPosts(normalizedPosts);
+      setFeed('all', normalizedPosts);
       
     } catch (error) {
       console.error('Error loading job seeker dashboard:', error);
@@ -149,8 +155,12 @@ const JobSeekerDashboardEnhanced = () => {
   const handleCreatePost = async (postData) => {
     try {
       const newPost = await postService.createPost(postData);
-      setFeedPosts(prev => [newPost, ...prev]);
-      toast.success('Post created successfully!');
+      setFeedPosts(prev => {
+        const next = [newPost, ...prev];
+        setFeed('all', next);
+        return next;
+      });
+      toast.success(TOAST_MESSAGES.POST_CREATED);
     } catch (error) {
       console.error('Error creating post:', error);
       throw error;
@@ -292,7 +302,9 @@ const JobSeekerDashboardEnhanced = () => {
 n                <h3 className="font-bold text-gray-900">Connections</h3>
                 <p className="text-2xl font-bold text-blue-600 mt-1">342</p>
                 <p className="text-sm text-gray-500">Expand your network</p>
-                <Button variant="outline" size="sm" className="mt-3 w-full">Find Connections</Button>
+                <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => navigate('/network')}>
+                  Find Connections
+                </Button>
               </div>
             </Card>
             </motion.div>
@@ -463,10 +475,23 @@ n                <h3 className="font-bold text-gray-900">Connections</h3>
                       <FeedCard
                         key={post.id || post._id}
                         post={post}
-                        currentUserId={user._id}
-                        onPostUpdate={(postId) => {
-                          setFeedPosts(prev => prev.filter(p => (p.id || p._id) !== postId));
-                          toast.success('Post deleted');
+                        currentUserId={user?._id || user?.id}
+                        onPostUpdate={(postUpdate) => {
+                          if (typeof postUpdate === 'string') {
+                            removePost(postUpdate);
+                            setFeedPosts((prev) => prev.filter((p) => (p.id || p._id) !== postUpdate));
+                            toast.success('Post deleted');
+                            return;
+                          }
+
+                          if (postUpdate?.id || postUpdate?._id) {
+                            upsertPost('all', postUpdate);
+                            setFeedPosts((prev) => prev.map((p) =>
+                              String(p.id || p._id) === String(postUpdate.id || postUpdate._id)
+                                ? { ...p, ...postUpdate }
+                                : p
+                            ));
+                          }
                         }}
                       />
                     ))

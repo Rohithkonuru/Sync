@@ -14,6 +14,7 @@ from app.services.notifications import create_notification
 from app.services.socket_manager import send_notification
 from app.services.sync_score import SyncScoreService
 from app.services.auth import get_user_by_id
+from app.services.scores import calculate_ats_score
 
 router = APIRouter()
 
@@ -29,6 +30,26 @@ def job_to_dict(job: dict) -> dict:
     if "applicants" not in job_dict:
         job_dict["applicants"] = []
     return job_dict
+
+
+def _extract_ats_score(value) -> Optional[float]:
+    """Normalize ATS score from int/float or dict formats."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, dict):
+        score = value.get("score")
+        if isinstance(score, (int, float)):
+            return float(score)
+    return None
+
+
+def _normalize_job_skills(job: dict) -> List[str]:
+    skills = job.get("skills_required") or []
+    if isinstance(skills, str):
+        return [s.strip() for s in skills.split(",") if s.strip()]
+    if isinstance(skills, list):
+        return [str(s).strip() for s in skills if str(s).strip()]
+    return []
 
 @router.post("/", response_model=JobResponse)
 async def create_job(
@@ -355,6 +376,16 @@ async def apply_for_job(
         contact_number = user.get('phone') or contact_phone
     if not contact_email:
         contact_email = email
+    if not address and user:
+        address = user.get('location')
+    if not portfolio_url and user:
+        portfolio_url = user.get('portfolio_url')
+        if not portfolio_url and user.get('projects'):
+            portfolio_url = next((project.get('url') for project in user.get('projects', []) if project.get('url')), None)
+    if not resume_file_url and user:
+        resume_file_url = user.get('resume_url')
+    if not skills_list and user and user.get('skills'):
+        skills_list = user.get('skills', [])
     
     # Validate mandatory fields
     errors = {}
@@ -366,7 +397,7 @@ async def apply_for_job(
         errors["email"] = "Invalid email format"
     if not contact_number or not contact_number.strip():
         errors["contact_number"] = "Contact number is required"
-    if not resume_file:
+    if not resume_file and not resume_file_url:
         errors["resume_file"] = "Resume upload is required"
     
     if errors:
@@ -379,6 +410,8 @@ async def apply_for_job(
     # Create application with status history
     application_dict = {
         "job_id": job_id,
+        "job_title": job.get("title"),
+        "company_name": job.get("company_name") or "Company",
         "applicant_id": str(current_user["_id"]),
         "recruiter_id": str(job["posted_by"]),  # Add recruiter_id for security
         "full_name": full_name,
@@ -431,6 +464,10 @@ async def apply_for_job(
     try:
         sync_score_service = SyncScoreService()
         await sync_score_service.record_activity(str(current_user["_id"]), "job_application")
+        # also update growth score
+        from app.services.growth_score import get_growth_score_service
+        growth_service = get_growth_score_service()
+        await growth_service.record_activity(str(current_user["_id"]), "job_application")
     except Exception as e:
         print(f"Warning: Failed to record job application activity: {str(e)}")
 
@@ -465,19 +502,47 @@ async def get_job_applications(
     applications = await db.job_applications.find({"job_id": job_id}).sort("applied_at", -1).to_list(length=None)
 
     # Enrich with applicant data and convert to dict
+    sync_score_service = SyncScoreService()
+    job_skills = _normalize_job_skills(job)
     enriched_applications = []
     for app in applications:
         applicant = await db.users.find_one({"_id": ObjectId(app["applicant_id"])})
         if applicant:
+            applicant_id = str(applicant["_id"])
+
+            # Resolve sync score using shared service (recruiters are allowed to view).
+            sync_data = await sync_score_service.get_sync_score(
+                applicant_id,
+                str(current_user["_id"]),
+                current_user.get("user_type")
+            )
+            sync_score = sync_data.get("score", 0) if isinstance(sync_data, dict) else 0
+            sync_score = sync_score if isinstance(sync_score, (int, float)) else 0
+
+            # Prefer ATS from application, then profile, then fallback calculation.
+            ats_score = _extract_ats_score(app.get("ats_score"))
+            if ats_score is None:
+                ats_score = _extract_ats_score(applicant.get("ats_score"))
+            if ats_score is None:
+                ats_score = calculate_ats_score(
+                    job_skills,
+                    applicant.get("skills", []) or [],
+                    app.get("resume_file_url") or applicant.get("resume_url")
+                )
+
             app["applicant"] = {
-                "id": str(applicant["_id"]),
+                "id": applicant_id,
                 "first_name": applicant.get("first_name"),
                 "last_name": applicant.get("last_name"),
                 "email": applicant.get("email"),
                 "headline": applicant.get("headline"),
                 "location": applicant.get("location"),
-                "profile_picture": applicant.get("profile_picture")
+                "profile_picture": applicant.get("profile_picture"),
+                "sync_score": int(round(sync_score)),
+                "ats_score": {"score": int(round(ats_score))}
             }
+            app["sync_score"] = int(round(sync_score))
+            app["ats_score"] = int(round(ats_score))
         # Convert to dict format
         enriched_applications.append(application_to_dict(app))
 
@@ -521,29 +586,37 @@ async def get_recruiter_job_applications(
     applications = await db.job_applications.find({"job_id": job_id}).sort("applied_at", -1).to_list(length=None)
 
     # Enrich with candidate data and calculate scores
+    sync_score_service = SyncScoreService()
+    job_skills = _normalize_job_skills(job)
     enriched_applications = []
     for app in applications:
         applicant = await db.users.find_one({"_id": ObjectId(app["applicant_id"])})
         if applicant:
-            # Calculate sync score (placeholder - implement actual scoring logic)
-            sync_score = 75  # Default score
-            
-            # Calculate ATS score based on profile completeness
-            ats_score = 0
-            if applicant.get("headline"):
-                ats_score += 20
-            if applicant.get("experience"):
-                ats_score += 30
-            if applicant.get("skills"):
-                ats_score += 25
-            if applicant.get("education"):
-                ats_score += 25
+            applicant_id = str(applicant["_id"])
+
+            sync_data = await sync_score_service.get_sync_score(
+                applicant_id,
+                str(current_user["_id"]),
+                current_user.get("user_type")
+            )
+            sync_score = sync_data.get("score", 0) if isinstance(sync_data, dict) else 0
+            sync_score = sync_score if isinstance(sync_score, (int, float)) else 0
+
+            ats_score = _extract_ats_score(app.get("ats_score"))
+            if ats_score is None:
+                ats_score = _extract_ats_score(applicant.get("ats_score"))
+            if ats_score is None:
+                ats_score = calculate_ats_score(
+                    job_skills,
+                    applicant.get("skills", []) or [],
+                    app.get("resume_file_url") or applicant.get("resume_url")
+                )
 
             enriched_app = {
-                "candidate_id": str(applicant["_id"]),
+                "candidate_id": applicant_id,
                 "name": f"{applicant.get('first_name', '')} {applicant.get('last_name', '')}".strip(),
-                "sync_score": sync_score,
-                "ats_score": ats_score,
+                "sync_score": int(round(sync_score)),
+                "ats_score": int(round(ats_score)),
                 "status": app.get("status", "submitted"),
                 "is_seen": app.get("is_seen", False),
                 "applied_at": app.get("applied_at"),
@@ -551,7 +624,18 @@ async def get_recruiter_job_applications(
                 "email": applicant.get("email"),
                 "headline": applicant.get("headline"),
                 "location": applicant.get("location"),
-                "profile_picture": applicant.get("profile_picture")
+                "profile_picture": applicant.get("profile_picture"),
+                "applicant": {
+                    "id": applicant_id,
+                    "first_name": applicant.get("first_name"),
+                    "last_name": applicant.get("last_name"),
+                    "email": applicant.get("email"),
+                    "headline": applicant.get("headline"),
+                    "location": applicant.get("location"),
+                    "profile_picture": applicant.get("profile_picture"),
+                    "sync_score": int(round(sync_score)),
+                    "ats_score": {"score": int(round(ats_score))},
+                }
             }
             enriched_applications.append(enriched_app)
 
@@ -572,16 +656,48 @@ async def get_my_applications(
     # Enrich with job data and convert to dict
     enriched_applications = []
     for app in applications:
-        job = await db.jobs.find_one({"_id": ObjectId(app["job_id"])})
+        job = None
+        job_id = app.get("job_id")
+        if job_id and ObjectId.is_valid(job_id):
+            job = await db.jobs.find_one({"_id": ObjectId(job_id)})
+
         if job:
+            company_name = job.get("company_name")
+            if not company_name:
+                poster_id = job.get("posted_by")
+                if poster_id and ObjectId.is_valid(str(poster_id)):
+                    poster = await db.users.find_one({"_id": ObjectId(str(poster_id))})
+                    if poster:
+                        company_name = (
+                            f"{poster.get('first_name', '')} {poster.get('last_name', '')}".strip()
+                            or "Company"
+                        )
+                company_name = company_name or "Company"
+
             app["job"] = {
                 "id": str(job["_id"]),
-                "title": job.get("title"),
-                "company_name": job.get("company_name"),
+                "title": job.get("title") or app.get("job_title") or "Job Application",
+                "company_name": company_name,
                 "location": job.get("location"),
                 "job_type": job.get("job_type"),
                 "posted_by": str(job.get("posted_by", ""))
             }
+
+            # Flattened fallback fields used by some dashboards/components.
+            app["job_title"] = app["job"]["title"]
+            app["company_name"] = app["job"]["company_name"]
+        else:
+            # Keep historical applications readable even if job no longer exists.
+            app["job"] = {
+                "id": str(job_id or ""),
+                "title": app.get("job_title") or "Job Application",
+                "company_name": app.get("company_name") or "Company",
+                "location": None,
+                "job_type": None,
+                "posted_by": ""
+            }
+            app["job_title"] = app["job"]["title"]
+            app["company_name"] = app["job"]["company_name"]
         enriched_applications.append(application_to_dict(app))
 
     return enriched_applications
@@ -978,6 +1094,9 @@ def application_to_dict(application: dict) -> dict:
     app_dict.setdefault("skills", [])
     app_dict.setdefault("experience_years", None)
     app_dict.setdefault("portfolio_url", None)
+    app_dict.setdefault("job", None)
+    app_dict.setdefault("job_title", None)
+    app_dict.setdefault("company_name", None)
     app_dict.setdefault("full_name", None)
     app_dict.setdefault("email", None)
     app_dict.setdefault("contact_number", None)

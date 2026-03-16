@@ -1,33 +1,23 @@
-# Resume Upload and ATS Scoring Implementation
+# Homepage Transformation Task
 
-## Overview
-Implement resume upload functionality and ATS scoring system for the Sync platform.
+## Current Status
+- [x] Analyzed current Register.js page structure
+- [x] Understood user requirements: transform /register page into homepage with Login/Signup buttons
+- [x] Confirmed plan with user
 
-## Completed Tasks
-- [x] Add `uploadResume` method to frontend API service (`frontend/src/services/api.js`)
-- [x] Add resume upload endpoint to backend (`backend/app/routes/users.py`)
-- [x] Update ATS scorer to use correct upload directory (`backend/app/services/ats_scorer.py`)
-- [x] Verify backend static file serving configuration (`backend/app/main.py`)
+## Tasks to Complete
+- [ ] Modify Register.js to create homepage layout with Login and Signup buttons
+- [ ] Implement button enlargement and form display logic
+- [ ] Remove complex multi-step signup form
+- [ ] Add state management for selected action (login/signup)
+- [ ] Integrate LoginForm component for login display
+- [ ] Create simplified signup form for signup display
+- [ ] Test the functionality
 
-## Pending Tasks
-- [ ] Test resume upload functionality
-- [ ] Test ATS score calculation after resume upload
-- [ ] Update frontend components to handle resume upload UI
-- [ ] Add error handling for upload failures
-- [ ] Add file validation on frontend
-- [ ] Update user profile to display resume status
-
-## Testing Checklist
-- [ ] Upload PDF resume file
-- [ ] Upload DOC/DOCX resume file
-- [ ] Verify file size limits (10MB)
-- [ ] Verify file type validation
-- [ ] Check ATS score calculation after upload
-- [ ] Verify resume URL is saved correctly
-- [ ] Test file serving from uploads endpoint
-
-## Notes
-- Resume files are stored in `./uploads` directory
-- Supported formats: PDF, DOC, DOCX
-- Maximum file size: 10MB
-- ATS scoring includes keywords, skills, experience, education, and completeness factors
+## Implementation Details
+- Keep hero section and feature grid
+- Add two prominent buttons: Login and Signup
+- When button clicked, enlarge it and show corresponding form below
+- Use existing LoginForm.js for login functionality
+- Create simplified signup form (reuse existing logic but simplified)
+- Ensure responsive design and smooth animations
