@@ -159,6 +159,18 @@ async def login(credentials: UserLogin):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # on successful login record activity and update scores
+    try:
+        from app.services.sync_score import SyncScoreService
+        from app.services.growth_score import get_growth_score_service
+        sync_service = SyncScoreService()
+        growth_service = get_growth_score_service()
+        uid = str(user["_id"])
+        await sync_service.record_activity(uid, "login")
+        await growth_service.record_activity(uid, "login")
+    except Exception:
+        pass
+    
     # Create access token
     access_token_expires = timedelta(minutes=settings.jwt_expire_minutes)
     access_token = create_access_token(
@@ -207,10 +219,22 @@ async def forgot_password(email: str):
 async def send_otp(request: OTPSendRequest):
     """Send OTP to email or phone"""
     if request.email:
-        await send_email_otp(request.email)
+        try:
+            await send_email_otp(request.email, purpose="email verification")
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to send email OTP: {str(e)}"
+            )
         return OTPResponse(message="OTP sent to email", success=True)
     elif request.phone:
-        await send_sms_otp(request.phone)
+        try:
+            await send_sms_otp(request.phone)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to send SMS OTP: {str(e)}"
+            )
         return OTPResponse(message="OTP sent to phone", success=True)
     else:
         raise HTTPException(

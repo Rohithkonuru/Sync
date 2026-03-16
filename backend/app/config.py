@@ -15,5 +15,18 @@ class Settings:
         cors_origins_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001")
         self.cors_origins: List[str] = [origin.strip() for origin in cors_origins_str.split(",")]
 
+        # Email (SMTP) settings
+        self.smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        self.smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_user: str = os.getenv("SMTP_USER", "")
+        self.smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+        self.smtp_from_name: str = os.getenv("SMTP_FROM_NAME", "Sync Platform")
+        self.smtp_from_email: str = os.getenv("SMTP_FROM_EMAIL", self.smtp_user)
+
+        # Twilio SMS settings
+        self.twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+        self.twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+        self.twilio_phone_number: str = os.getenv("TWILIO_PHONE_NUMBER", "")
+
 settings = Settings()
 
