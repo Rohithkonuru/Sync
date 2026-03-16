@@ -2,6 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Build cache invalidation: 2026-03-17
 # Install system deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
