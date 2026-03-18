@@ -11,6 +11,13 @@ const NewRegisterForm = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { register } = useAuth();
+  const [step1Snapshot, setStep1Snapshot] = useState({
+    first_name: '',
+    last_name: '',
+    email: '',
+    password: '',
+    user_type: 'professional',
+  });
 
   // Form data
   const [formData, setFormData] = useState({
@@ -239,6 +246,13 @@ const NewRegisterForm = () => {
 
   const handleNext = () => {
     if (step === 1 && validateStep1()) {
+      setStep1Snapshot({
+        first_name: (formData.first_name || '').trim(),
+        last_name: (formData.last_name || '').trim(),
+        email: (formData.email || '').trim(),
+        password: formData.password || '',
+        user_type: formData.user_type || 'professional',
+      });
       setStep(2);
     }
   };
@@ -270,12 +284,31 @@ const NewRegisterForm = () => {
 
     setLoading(true);
     try {
+      const firstName = (formData.first_name || step1Snapshot.first_name || '').trim();
+      const lastName = (formData.last_name || step1Snapshot.last_name || '').trim();
+      const email = (formData.email || step1Snapshot.email || '').trim();
+      const password = formData.password || step1Snapshot.password || '';
+      const userType = formData.user_type || step1Snapshot.user_type || 'professional';
+
+      if (!firstName || !lastName || !email || !password) {
+        toast.error('Please complete Step 1 details again.');
+        setStep(1);
+        return;
+      }
+
       // Create FormData for file upload
       const submitData = new FormData();
+
+      // Always append required fields first.
+      submitData.append('first_name', firstName);
+      submitData.append('last_name', lastName);
+      submitData.append('email', email);
+      submitData.append('password', password);
+      submitData.append('user_type', userType);
       
       // Add all form fields
       Object.keys(formData).forEach(key => {
-        if (key !== 'skills') {
+        if (!['skills', 'first_name', 'last_name', 'email', 'password', 'user_type'].includes(key)) {
           submitData.append(key, formData[key]);
         }
       });

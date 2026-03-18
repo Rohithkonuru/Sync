@@ -6,7 +6,7 @@
  * Base API class
  */
 class BaseAPI {
-  constructor(baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000/api') {
+  constructor(baseURL = process.env.REACT_APP_API_URL || 'https://sync-backend-production.up.railway.app') {
     this.baseURL = baseURL;
     this.defaultHeaders = {
       'Content-Type': 'application/json',

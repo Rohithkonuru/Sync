@@ -17,11 +17,15 @@ router = APIRouter()
 
 @router.post("/register", response_model=Token)
 async def register(
-    email: str = Form(...),
-    password: str = Form(...),
-    first_name: str = Form(...),
-    last_name: str = Form(...),
-    user_type: str = Form("professional"),
+    email: Optional[str] = Form(None),
+    password: Optional[str] = Form(None),
+    first_name: Optional[str] = Form(None),
+    last_name: Optional[str] = Form(None),
+    user_type: Optional[str] = Form("professional"),
+    # Alternate field names from some clients/builds
+    firstName: Optional[str] = Form(None),
+    lastName: Optional[str] = Form(None),
+    userType: Optional[str] = Form(None),
     location: Optional[str] = Form(None),
     headline: Optional[str] = Form(None),
     bio: Optional[str] = Form(None),
@@ -37,6 +41,27 @@ async def register(
 ):
     """Register a new user with optional resume upload"""
     import json
+
+    # Normalize alternate field names and avoid framework-level 422 loops.
+    first_name = first_name or firstName
+    last_name = last_name or lastName
+    user_type = user_type or userType or "professional"
+
+    missing_fields = []
+    if not email:
+        missing_fields.append("email")
+    if not password:
+        missing_fields.append("password")
+    if not first_name:
+        missing_fields.append("first_name")
+    if not last_name:
+        missing_fields.append("last_name")
+
+    if missing_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing required fields: {', '.join(missing_fields)}"
+        )
     
     # Validate resume requirement for student/professional/job_seeker
     if user_type in ['student', 'job_seeker'] and not resume_file:
@@ -83,8 +108,10 @@ async def register(
     if skills:
         try:
             skills_list = json.loads(skills) if isinstance(skills, str) else skills
-        except:
-            pass
+        except Exception:
+            # Fallback for comma-separated skills from multipart forms.
+            if isinstance(skills, str):
+                skills_list = [s.strip() for s in skills.split(',') if s.strip()]
     
     # Build user data dict
     user_dict = {
@@ -220,22 +247,30 @@ async def send_otp(request: OTPSendRequest):
     """Send OTP to email or phone"""
     if request.email:
         try:
-            await send_email_otp(request.email, purpose="email verification")
+            otp = await send_email_otp(request.email, purpose="email verification")
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Failed to send email OTP: {str(e)}"
             )
-        return OTPResponse(message="OTP sent to email", success=True)
+        return OTPResponse(
+            message="OTP sent to email",
+            success=True,
+            otp=otp if settings.otp_debug_mode else None,
+        )
     elif request.phone:
         try:
-            await send_sms_otp(request.phone)
+            otp = await send_sms_otp(request.phone)
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Failed to send SMS OTP: {str(e)}"
             )
-        return OTPResponse(message="OTP sent to phone", success=True)
+        return OTPResponse(
+            message="OTP sent to phone",
+            success=True,
+            otp=otp if settings.otp_debug_mode else None,
+        )
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

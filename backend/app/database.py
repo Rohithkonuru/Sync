@@ -13,7 +13,16 @@ database = Database()
 async def connect_to_mongo():
     """Create database connection"""
     try:
-        database.client = AsyncIOMotorClient(settings.mongodb_uri, serverSelectionTimeoutMS=5000)
+        # Connection pooling for production - allows multiple concurrent connections
+        database.client = AsyncIOMotorClient(
+            settings.mongodb_uri, 
+            serverSelectionTimeoutMS=5000,
+            maxPoolSize=50,  # Support multiple concurrent users
+            minPoolSize=10,
+            retryWrites=True,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=30000,
+        )
         # Test connection
         await database.client.admin.command('ping')
         logger.info("Connected to MongoDB")

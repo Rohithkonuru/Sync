@@ -13,4 +13,5 @@ class OTPVerifyRequest(BaseModel):
 class OTPResponse(BaseModel):
     message: str
     success: bool
+    otp: Optional[str] = None
 

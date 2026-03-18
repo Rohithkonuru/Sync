@@ -24,10 +24,20 @@ async def shutdown_event():
     await close_mongo_connection()
 
 # CORS Configuration
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+# In production, allow all origins to support multiple users from different domains
+# The frontend will handle authentication via JWT tokens
+cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+
+if cors_origins_env:
+    # If CORS_ORIGINS is explicitly set, use those origins
+    origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+else:
+    # In production (no CORS_ORIGINS set), allow all origins
+    origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=origins if origins != ["*"] else "*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

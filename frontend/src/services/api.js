@@ -1,13 +1,29 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_URL = process.env.REACT_APP_API_URL || 'https://sync-backend-production.up.railway.app';
 
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
+
+const formDataToRegisterPayload = (formData) => {
+  const payload = {};
+  for (const [key, value] of formData.entries()) {
+    if (key === 'resume_file' || key === 'confirm_password' || key === 'email_verified' || key === 'phone_verified') {
+      continue;
+    }
+    payload[key] = value;
+  }
+
+  if (typeof payload.skills === 'string') {
+    payload.skills = payload.skills
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  return payload;
+};
 
 const ABSOLUTE_URL_PATTERN = /^https?:\/\//i;
 
@@ -95,14 +111,19 @@ api.interceptors.response.use(
 
 export const authService = {
   login: (email, password) => api.post('/api/auth/login', { email, password }),
-  register: (userData) => {
-    // If FormData, send with multipart headers to full register endpoint
+  register: async (userData) => {
+    // If FormData, let the browser set multipart boundary automatically.
     if (userData instanceof FormData) {
-      return api.post('/api/auth/register', userData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      try {
+        return await api.post('/api/auth/register', userData);
+      } catch (error) {
+        // Mobile browsers can intermittently fail multipart uploads with a network error.
+        if (!error.response) {
+          const fallbackPayload = formDataToRegisterPayload(userData);
+          return api.post('/api/auth/register/simple', fallbackPayload);
+        }
+        throw error;
+      }
     }
     // For simple registration, use simple endpoint
     return api.post('/api/auth/register/simple', userData);
