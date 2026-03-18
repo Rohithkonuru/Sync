@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Depends, UploadFile, File, Query
+from fastapi.responses import FileResponse
 from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
@@ -481,27 +482,87 @@ async def upload_profile_picture(
         # Optimize image
         optimized_content = optimize_image(file_content, max_width=500, max_height=500, quality=85)
         
-        # Convert to Base64 for storage in MongoDB
+        # Convert to Base64 for MongoDB storage
         base64_image = base64.b64encode(optimized_content).decode('utf-8')
-        data_url = f"data:{file.content_type};base64,{base64_image}"
         
-        # Store directly in user document (survives deployments/restarts)
+        # Store in MongoDB with metadata
         db = get_database()
         await db.users.update_one(
             {"_id": ObjectId(current_user["_id"])},
             {"$set": {
-                "profile_picture": data_url,
+                "profile_picture_base64": base64_image,
                 "profile_picture_type": file.content_type,
                 "updated_at": datetime.utcnow()
             }}
         )
         
-        # Return data URL for immediate display
-        return {"url": data_url, "type": file.content_type}
+        # Return API URL instead of data URL (much more efficient)
+        return {"url": f"/api/users/me/profile-picture", "type": file.content_type}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process image: {str(e)}"
+        )
+
+@router.get("/me/profile-picture")
+async def get_profile_picture(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get current user's profile picture as inline image"""
+    base64_image = current_user.get("profile_picture_base64")
+    content_type = current_user.get("profile_picture_type", "image/jpeg")
+    
+    if not base64_image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile picture not found"
+        )
+    
+    try:
+        import base64
+        image_data = base64.b64decode(base64_image)
+        return FileResponse(
+            io.BytesIO(image_data),
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
+                "Content-Disposition": "inline"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving profile picture: {str(e)}"
+        )
+
+@router.get("/{user_id}/profile-picture")
+async def get_user_profile_picture(user_id: str):
+    """Get any user's profile picture"""
+    try:
+        user = await get_user_by_id(user_id)
+        if not user or not user.get("profile_picture_base64"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profile picture not found"
+            )
+        
+        import base64
+        base64_image = user.get("profile_picture_base64")
+        content_type = user.get("profile_picture_type", "image/jpeg")
+        
+        image_data = base64.b64decode(base64_image)
+        return FileResponse(
+            io.BytesIO(image_data),
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Disposition": "inline"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving profile picture: {str(e)}"
         )
 
 from app.services.ats_scorer import calculate_ats_score
@@ -667,27 +728,57 @@ async def upload_banner_picture(
         # Optimize banner image (larger dimensions)
         optimized_content = optimize_image(file_content, max_width=1920, max_height=600, quality=85)
         
-        # Convert to Base64 for storage in MongoDB
+        # Convert to Base64 for MongoDB storage
         base64_image = base64.b64encode(optimized_content).decode('utf-8')
-        data_url = f"data:{file.content_type};base64,{base64_image}"
         
-        # Store directly in user document (survives deployments/restarts)
+        # Store in MongoDB with metadata
         db = get_database()
         await db.users.update_one(
             {"_id": ObjectId(current_user["_id"])},
             {"$set": {
-                "banner_picture": data_url,
+                "banner_picture_base64": base64_image,
                 "banner_picture_type": file.content_type,
                 "updated_at": datetime.utcnow()
             }}
         )
         
-        # Return data URL for immediate display
-        return {"url": data_url, "type": file.content_type}
+        # Return API URL instead of data URL
+        return {"url": f"/api/users/me/banner-picture", "type": file.content_type}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process image: {str(e)}"
+        )
+
+@router.get("/me/banner-picture")
+async def get_banner_picture(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get current user's banner picture as inline image"""
+    base64_image = current_user.get("banner_picture_base64")
+    content_type = current_user.get("banner_picture_type", "image/jpeg")
+    
+    if not base64_image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Banner picture not found"
+        )
+    
+    try:
+        import base64
+        image_data = base64.b64decode(base64_image)
+        return FileResponse(
+            io.BytesIO(image_data),
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=31536000",
+                "Content-Disposition": "inline"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving banner picture: {str(e)}"
         )
 
 @router.get("/me/ats-score")

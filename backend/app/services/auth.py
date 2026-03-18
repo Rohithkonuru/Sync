@@ -191,5 +191,19 @@ def user_to_dict(user: dict) -> dict:
     user["id"] = str(user["_id"])
     user.pop("_id", None)
     user.pop("password", None)
+    
+    # Check for Base64 images and set proper URLs before removing
+    if user.get("profile_picture_base64"):
+        user["profile_picture"] = "/api/users/me/profile-picture"
+    
+    if user.get("banner_picture_base64"):
+        user["banner_picture"] = "/api/users/me/banner-picture"
+    
+    # Remove Base64 fields from response (they're not needed on client)
+    user.pop("profile_picture_base64", None)
+    user.pop("banner_picture_base64", None)
+    user.pop("profile_picture_type", None)
+    user.pop("banner_picture_type", None)
+    
     return user
 

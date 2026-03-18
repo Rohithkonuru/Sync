@@ -33,6 +33,10 @@ const toAbsoluteMediaUrl = (value) => {
   if (ABSOLUTE_URL_PATTERN.test(value) || value.startsWith('data:') || value.startsWith('blob:')) {
     return value;
   }
+  // Handle API endpoints for images (profile-picture, banner-picture, etc)
+  if (value.startsWith('/api/users/')) {
+    return `${API_URL}${value}`;
+  }
   if (value.startsWith('/uploads/')) {
     return `${API_URL}${value}`;
   }
