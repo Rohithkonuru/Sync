@@ -91,11 +91,29 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => normalizeMediaUrls(response.data),
   (error) => {
-    console.error('API Error:', {
+    // Enhanced logging for debugging
+    const errorInfo = {
       status: error.response?.status,
+      statusText: error.response?.statusText,
       data: error.response?.data,
       message: error.message,
-    });
+      code: error.code,
+      url: error.config?.url,
+      method: error.config?.method,
+    };
+    
+    console.error('API Error:', errorInfo);
+    
+    // For network errors, log additional context
+    if (!error.response) {
+      console.error('Network Error Details:', {
+        type: 'NETWORK_ERROR',
+        isNetworkFailure: error.message.includes('Network') || error.message.includes('ERR_'),
+        message: error.message,
+        timestamp: new Date().toISOString(),
+        userAgent: navigator.userAgent,
+      });
+    }
     
     if (error.response?.status === 401) {
       localStorage.removeItem('token');

@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 from app.routes import auth, users, posts, jobs, messages, companies, notifications, connections, analytics, events, subscriptions, interviews
 from app.services.socket_manager import sio
 from app.database import connect_to_mongo, close_mongo_connection
@@ -41,6 +42,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Expose all headers for client access
+    max_age=86400,  # Cache preflight requests for 24 hours
 )
 
 # Static files for uploads
@@ -72,7 +75,27 @@ async def read_root():
 
 @app.get("/api/health")
 def health_check():
+    """Basic health check"""
     return {"status": "healthy"}
+
+@app.get("/api/health/detailed")
+async def detailed_health_check():
+    """Detailed health check with database connection status"""
+    try:
+        db = get_database()
+        await db.client.admin.command('ping')
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"disconnected: {str(e)}"
+    
+    return {
+        "status": "healthy",
+        "api": "running",
+        "database": db_status,
+        "timestamp": str(datetime.utcnow()),
+        "version": "1.0.0",
+        "cors": "enabled"
+    }
 
 # Serve React Frontend (Production) - Disabled for development
 # current_dir = os.path.dirname(os.path.abspath(__file__))
