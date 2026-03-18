@@ -18,6 +18,7 @@ import MyApplications from './pages/MyApplications';
 import SavedPostsPage from './pages/SavedPostsPage';
 import ArticleCreatePage from './pages/ArticleCreatePage';
 import ProfileViewsPage from './pages/ProfileViewsPage';
+import SearchConnections from './pages/SearchConnections';
 import Navbar from './components/Navbar';
 import PrivateRoute from './components/PrivateRoute';
 import { AuthProvider } from './context/AuthContext';
@@ -127,6 +128,7 @@ function App() {
                         <Route path="/communities" element={<Communities />} />
                         <Route path="/connections" element={<MyConnections />} />
                         <Route path="/network" element={<MyConnections />} />
+                        <Route path="/search-connections" element={<SearchConnections />} />
                         <Route path="/saved" element={<SavedPostsPage />} />
                         <Route path="/articles/create" element={<ArticleCreatePage />} />
                         <Route path="/analytics/profile-views" element={<ProfileViewsPage />} />
