@@ -457,7 +457,9 @@ async def upload_profile_picture(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload and optimize profile picture"""
+    """Upload and store profile picture in MongoDB (survives deployments)"""
+    import base64
+    
     # Validate file type
     allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
     if file.content_type not in allowed_types:
@@ -479,25 +481,23 @@ async def upload_profile_picture(
         # Optimize image
         optimized_content = optimize_image(file_content, max_width=500, max_height=500, quality=85)
         
-        # Generate unique filename
-        unique_filename = f"profile_{uuid.uuid4()}.jpg"
-        upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, unique_filename)
-
-        # Save optimized file
-        with open(file_path, "wb") as buffer:
-            buffer.write(optimized_content)
-
-        # Update user's profile picture URL
-        file_url = f"/uploads/{unique_filename}"
+        # Convert to Base64 for storage in MongoDB
+        base64_image = base64.b64encode(optimized_content).decode('utf-8')
+        data_url = f"data:{file.content_type};base64,{base64_image}"
+        
+        # Store directly in user document (survives deployments/restarts)
         db = get_database()
         await db.users.update_one(
             {"_id": ObjectId(current_user["_id"])},
-            {"$set": {"profile_picture": file_url, "updated_at": datetime.utcnow()}}
+            {"$set": {
+                "profile_picture": data_url,
+                "profile_picture_type": file.content_type,
+                "updated_at": datetime.utcnow()
+            }}
         )
         
-        return {"url": file_url}
+        # Return data URL for immediate display
+        return {"url": data_url, "type": file.content_type}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -643,7 +643,9 @@ async def upload_banner_picture(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload and optimize banner picture"""
+    """Upload and store banner picture in MongoDB (survives deployments)"""
+    import base64
+    
     # Validate file type
     allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
     if file.content_type not in allowed_types:
@@ -665,25 +667,23 @@ async def upload_banner_picture(
         # Optimize banner image (larger dimensions)
         optimized_content = optimize_image(file_content, max_width=1920, max_height=600, quality=85)
         
-        # Generate unique filename
-        unique_filename = f"banner_{uuid.uuid4()}.jpg"
-        upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, unique_filename)
-
-        # Save optimized file
-        with open(file_path, "wb") as buffer:
-            buffer.write(optimized_content)
-
-        # Update user's banner picture URL
-        file_url = f"/uploads/{unique_filename}"
+        # Convert to Base64 for storage in MongoDB
+        base64_image = base64.b64encode(optimized_content).decode('utf-8')
+        data_url = f"data:{file.content_type};base64,{base64_image}"
+        
+        # Store directly in user document (survives deployments/restarts)
         db = get_database()
         await db.users.update_one(
             {"_id": ObjectId(current_user["_id"])},
-            {"$set": {"banner_picture": file_url, "updated_at": datetime.utcnow()}}
+            {"$set": {
+                "banner_picture": data_url,
+                "banner_picture_type": file.content_type,
+                "updated_at": datetime.utcnow()
+            }}
         )
         
-        return {"url": file_url}
+        # Return data URL for immediate display
+        return {"url": data_url, "type": file.content_type}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
