@@ -269,7 +269,7 @@ const MessageComposer = ({
           <input
             ref={imageInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/heic,image/heif"
             multiple
             onChange={(e) => handleFileSelect(Array.from(e.target.files), 'image')}
             className="hidden"

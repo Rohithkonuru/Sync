@@ -456,7 +456,7 @@ const Settings = () => {
                       <input
                         ref={bannerInputRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/heic,image/heif"
                         onChange={(e) => handleFileSelect(e, 'banner')}
                         className="hidden"
                       />
@@ -521,7 +521,7 @@ const Settings = () => {
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/*"
+                        accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/heic,image/heif"
                         onChange={(e) => handleFileSelect(e, 'profile')}
                         className="hidden"
                       />

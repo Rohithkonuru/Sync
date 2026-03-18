@@ -6,6 +6,7 @@ from bson import ObjectId
 import os
 import uuid
 from PIL import Image
+import pillow_heif  # Enable HEIC/HEIF support for PIL
 import io
 from app.models.user import UserResponse, UserUpdate
 from app.middleware.auth_middleware import get_current_user
@@ -462,11 +463,11 @@ async def upload_profile_picture(
     import base64
     
     # Validate file type
-    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."
+            detail="Invalid file type. Only JPEG, PNG, GIF, WebP, and mobile formats (HEIC/HEIF) are allowed."
         )
 
     # Validate file size (max 5MB)
@@ -708,14 +709,12 @@ async def upload_banner_picture(
     import base64
     
     # Validate file type
-    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"]
+    allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif"]
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed."
+            detail="Invalid file type. Only JPEG, PNG, GIF, WebP, and mobile formats (HEIC/HEIF) are allowed."
         )
-
-    # Validate file size (max 10MB for banner)
     max_size = 10 * 1024 * 1024  # 10MB
     file_content = await file.read()
     if len(file_content) > max_size:
