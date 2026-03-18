@@ -146,13 +146,17 @@ async def send_email_otp(email: str, purpose: str = "email verification") -> str
         msg.attach(MIMEText(f"Your Sync OTP is: {otp}  (valid 10 minutes)", "plain"))
         msg.attach(MIMEText(_build_otp_email_html(otp, purpose), "html"))
 
+        # Use SSL (implicit TLS) for port 465, STARTTLS for port 587
+        use_tls = settings.smtp_port == 587
+        
         await aiosmtplib.send(
             msg,
             hostname=settings.smtp_host,
             port=settings.smtp_port,
             username=settings.smtp_user,
             password=settings.smtp_password,
-            start_tls=True,
+            use_tls=use_tls,
+            start_tls=(not use_tls),  # Start TLS for 587, SSL for 465
         )
         logger.info(f"[OTP] Email sent to {email}")
     except Exception as e:
