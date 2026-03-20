@@ -33,6 +33,7 @@ const SearchConnections = () => {
       setSuggestedConnections(suggestions || []);
     } catch (error) {
       console.error('Error loading suggestions:', error);
+      setSuggestedConnections([]);
     }
   };
 

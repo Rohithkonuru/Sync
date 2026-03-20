@@ -25,6 +25,7 @@ import PrivateRoute from './components/PrivateRoute';
 import { AuthProvider } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
 import { FeedProvider } from './context/FeedContext';
+import { UserProvider } from './context/UserContext';
 import './App.css';
 
 // Error Boundary Component
@@ -76,9 +77,10 @@ function App() {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <SocketProvider>
-          <FeedProvider>
-            <Router>
+        <UserProvider>
+          <SocketProvider>
+            <FeedProvider>
+              <Router>
               <div className="App min-h-screen bg-gray-50 overflow-x-hidden">
               <Toaster
                 position="top-right"
@@ -145,9 +147,10 @@ function App() {
                 />
               </Routes>
               </div>
-            </Router>
-          </FeedProvider>
-        </SocketProvider>
+              </Router>
+            </FeedProvider>
+          </SocketProvider>
+        </UserProvider>
       </AuthProvider>
     </ErrorBoundary>
   );

@@ -4,14 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiPlus, FiSearch, FiX } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { useFeed } from '../../context/FeedContext';
+import { postService, userService } from '../../services/api';
 import FeedCard from '../common/FeedCard';
+import UserCard from '../common/UserCard';
 import PostComposer from '../PostComposer';
 
 const PAGE_SIZE = 10;
 
 const MobileOptimizedDashboard = () => {
   const navigate = useNavigate();
-  const { getFeed, removePost } = useFeed();
+  const { fetchFeed, removePost, upsertPost } = useFeed();
 
   const [feedPosts, setFeedPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,13 +21,16 @@ const MobileOptimizedDashboard = () => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [showPostComposer, setShowPostComposer] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [sendingRequest, setSendingRequest] = useState({});
+  const [connectionStatus, setConnectionStatus] = useState({});
 
   const feedEndRef = useRef(null);
 
   const loadInitialFeed = async () => {
     try {
       setLoading(true);
-      const feed = await getFeed({ page: 1, limit: PAGE_SIZE });
+      const feed = await fetchFeed({ page: 1, limit: PAGE_SIZE, sort_by: 'recent' });
       const normalized = feed || [];
       setFeedPosts(normalized);
       setPage(1);
@@ -43,9 +48,12 @@ const MobileOptimizedDashboard = () => {
     try {
       setLoadingMore(true);
       const nextPage = page + 1;
-      const morePosts = await getFeed({ page: nextPage, limit: PAGE_SIZE });
+      const morePosts = await fetchFeed({ page: nextPage, limit: PAGE_SIZE, sort_by: 'recent' });
       const normalized = morePosts || [];
-      setFeedPosts((prev) => [...prev, ...normalized]);
+      setFeedPosts((prev) => {
+        const seen = new Set(prev.map((p) => String(p.id || p._id)));
+        return [...prev, ...normalized.filter((p) => !seen.has(String(p.id || p._id)))];
+      });
       setPage(nextPage);
       setHasMore(normalized.length >= PAGE_SIZE);
     } catch (error) {
@@ -57,7 +65,17 @@ const MobileOptimizedDashboard = () => {
 
   useEffect(() => {
     loadInitialFeed();
+    loadSuggestions();
   }, []);
+
+  const loadSuggestions = async () => {
+    try {
+      const data = await userService.getSuggestions();
+      setSuggestions(Array.isArray(data) ? data.slice(0, 6) : []);
+    } catch {
+      setSuggestions([]);
+    }
+  };
 
   useEffect(() => {
     const node = feedEndRef.current;
@@ -76,9 +94,31 @@ const MobileOptimizedDashboard = () => {
     return () => observer.disconnect();
   }, [hasMore, loading, loadingMore, page]);
 
-  const handlePostCreated = (newPost) => {
-    setFeedPosts((prev) => [newPost, ...prev]);
-    setShowPostComposer(false);
+  const handlePostCreated = async (payload) => {
+    try {
+      const createdPost = await postService.createPost(payload);
+      setFeedPosts((prev) => [createdPost, ...prev]);
+      upsertPost('all', createdPost);
+      setShowPostComposer(false);
+      toast.success('Post created');
+    } catch {
+      toast.error('Failed to create post');
+    }
+  };
+
+  const handleConnect = async (userId) => {
+    if (!userId || sendingRequest[userId]) return;
+    setSendingRequest((prev) => ({ ...prev, [userId]: true }));
+    try {
+      await userService.sendConnectionRequest(userId);
+      setConnectionStatus((prev) => ({ ...prev, [userId]: 'pending' }));
+      setSuggestions((prev) => prev.filter((user) => String(user.id || user._id) !== String(userId)));
+      toast.success('Connection request sent');
+    } catch {
+      toast.error('Failed to send request');
+    } finally {
+      setSendingRequest((prev) => ({ ...prev, [userId]: false }));
+    }
   };
 
   const handleDeletePost = (postId) => {
@@ -113,6 +153,29 @@ const MobileOptimizedDashboard = () => {
           </span>
         </motion.button>
       </div>
+
+      {suggestions.length > 0 && (
+        <div className="px-3 pb-3">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-neutral-900">People You May Know</h2>
+            <button onClick={() => navigate('/network')} className="text-xs text-blue-600 font-medium">See all</button>
+          </div>
+          <div className="space-y-2">
+            {suggestions.map((person) => {
+              const personId = person._id || person.id;
+              return (
+                <UserCard
+                  key={personId}
+                  user={person}
+                  status={connectionStatus[personId]}
+                  connecting={sendingRequest[personId]}
+                  onConnect={handleConnect}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <motion.div
         initial={{ opacity: 0 }}

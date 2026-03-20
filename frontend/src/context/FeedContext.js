@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { postService } from '../services/api';
 
 const FeedContext = createContext(null);
 
@@ -25,6 +26,18 @@ export const FeedProvider = ({ children }) => {
   const getFeed = useCallback((scope = 'all') => {
     return feeds[scope] || [];
   }, [feeds]);
+
+  const fetchFeed = useCallback(async (params = {}) => {
+    const data = await postService.getFeed(params);
+    const posts = Array.isArray(data) ? data : [];
+    setFeed('all', (current) => {
+      if ((params?.page || 1) > 1) {
+        return [...current, ...posts];
+      }
+      return posts;
+    });
+    return posts;
+  }, [setFeed]);
 
   const removePost = useCallback((postId) => {
     const postKey = String(postId);
@@ -57,9 +70,10 @@ export const FeedProvider = ({ children }) => {
     feeds,
     setFeed,
     getFeed,
+    fetchFeed,
     removePost,
     upsertPost,
-  }), [feeds, setFeed, getFeed, removePost, upsertPost]);
+  }), [feeds, setFeed, getFeed, fetchFeed, removePost, upsertPost]);
 
   return <FeedContext.Provider value={value}>{children}</FeedContext.Provider>;
 };

@@ -49,9 +49,12 @@ const FeedCard = ({
 
   const resolveImageUrl = (url) => {
     if (!url) return url;
+    const apiBase = process.env.REACT_APP_API_URL || 'https://sync-backend-production.up.railway.app';
+    if (url.startsWith('/api/')) {
+      return `${apiBase}${url}`;
+    }
     if (url.startsWith('/uploads/')) {
-      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-      return `${base}${url}`;
+      return `${apiBase}${url}`;
     }
     return url;
   };
@@ -234,7 +237,7 @@ const FeedCard = ({
               animate={{ opacity: 1 }}
               src={resolveImageUrl(post.media_url)}
               alt="Post media"
-              className="w-full h-48 object-cover rounded-lg"
+              className="w-full h-auto rounded-lg object-cover"
             />
           </div>
         )}

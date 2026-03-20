@@ -1,7 +1,7 @@
 import os
 import uuid
 import random
-from fastapi import APIRouter, HTTPException, status, Depends, Query, File, UploadFile
+from fastapi import APIRouter, HTTPException, status, Depends, Query, File, UploadFile, Form
 from typing import List
 from datetime import datetime, timedelta
 from bson import ObjectId
@@ -120,6 +120,34 @@ async def upload_post_image(
         )
 
 
+async def _save_uploaded_media(file: UploadFile):
+    content_type = file.content_type or ""
+    if not (content_type.startswith("image/") or content_type.startswith("video/")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only images or videos are allowed."
+        )
+
+    file_content = await file.read()
+    max_size = 25 * 1024 * 1024 if content_type.startswith("video/") else 5 * 1024 * 1024
+    if len(file_content) > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File too large. Maximum size exceeded."
+        )
+
+    unique_filename = f"post_{uuid.uuid4()}_{file.filename}"
+    upload_dir = os.getenv("UPLOAD_DIR", "./uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, unique_filename)
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(file_content)
+
+    media_type = "video" if content_type.startswith("video/") else "image"
+    return f"/uploads/{unique_filename}", media_type
+
+
 @router.post("", response_model=PostResponse)
 async def create_post(post_data: PostCreate, current_user: dict = Depends(get_current_user)):
     """Create a new post"""
@@ -164,6 +192,52 @@ async def create_post(post_data: PostCreate, current_user: dict = Depends(get_cu
     except Exception as e:
         print(f"Error creating post: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create post: {str(e)}")
+
+
+@router.post("/create", response_model=PostResponse)
+async def create_post_with_form_data(
+    content: str = Form(""),
+    media: UploadFile = File(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Create a post using multipart/form-data (mobile-safe upload path)."""
+    try:
+        media_url = None
+        media_type = None
+        images = []
+
+        if media is not None:
+            media_url, media_type = await _save_uploaded_media(media)
+            if media_type == "image":
+                images = [media_url]
+
+        if not (content or media_url):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Post must include content or media"
+            )
+
+        payload = PostCreate(
+            content=content,
+            images=images,
+            media_url=media_url,
+            media_type=media_type,
+        )
+        return await create_post(payload, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create post: {str(e)}")
+
+
+@router.post("/create/legacy", response_model=PostResponse)
+async def create_post_with_form_data_legacy(
+    content: str = Form(""),
+    media: UploadFile = File(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Legacy compatibility alias for multipart post creation."""
+    return await create_post_with_form_data(content=content, media=media, current_user=current_user)
 
 @router.get("", response_model=List[PostResponse])
 async def get_posts(
@@ -547,30 +621,14 @@ async def get_feed(
     include_recommended: bool = Query(True),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get personalized feed with connections' posts and recommended posts"""
+    """Get global feed with connection boost, popularity boost, and recency ordering."""
     db = get_database()
     user_id = str(current_user["_id"])
-    connections = current_user.get("connections", [])
-    connections.append(user_id)
-    
-    # Fetch posts from connections
-    connection_posts = await db.posts.find({
-        "user_id": {"$in": connections}
-    }).to_list(length=None)
-    
-    # Add recommended posts if enabled
-    all_posts = list(connection_posts)
-    if include_recommended:
-        # Get popular posts from non-connections (posts with high engagement)
-        recommended_posts = await db.posts.find({
-            "user_id": {"$nin": connections}
-        }).to_list(length=50)  # Get more to filter
-        
-        # Filter by engagement (likes + comments + shares)
-        for post in recommended_posts:
-            engagement = _count_items(post.get("likes", [])) + _count_items(post.get("comments", [])) + post.get("shares", 0)
-            if engagement >= 5:  # Only show posts with at least 5 total engagements
-                all_posts.append(post)
+    connections = set(current_user.get("connections", []))
+    connections.add(user_id)
+
+    # Global feed: include all posts and prioritize with scoring when requested.
+    all_posts = await db.posts.find({}).to_list(length=500)
     
     # Calculate relevance score for each post
     if sort_by == "relevance":
@@ -578,22 +636,19 @@ async def get_feed(
             likes_count = _count_items(post.get("likes", []))
             comments_count = _count_items(post.get("comments", []))
             shares_count = post.get("shares", 0)
-            
-            # Recency factor: more recent = higher score (decay over 7 days)
-            from datetime import timedelta
+
             days_old = (datetime.utcnow() - post.get("created_at", datetime.utcnow())).days
-            recency_factor = max(0, 10 - days_old)
-            
-            # Boost connection posts
+            recency_factor = max(0, 14 - days_old)
+
             is_connection = post.get("user_id") in connections
-            connection_boost = 5 if is_connection else 0
-            
-            post["_relevance_score"] = (likes_count * 2) + comments_count + (shares_count * 3) + recency_factor + connection_boost
-        
-        # Sort by relevance score (descending)
+            connection_boost = 8 if is_connection else 0
+            popularity_boost = min((likes_count + comments_count + (shares_count * 2)), 20)
+
+            post["_relevance_score"] = connection_boost + popularity_boost + recency_factor
+
         all_posts.sort(key=lambda x: x.get("_relevance_score", 0), reverse=True)
     else:
-        # Sort by created_at (most recent first)
+        # Required stable global ordering by recency.
         all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
     
     # Apply pagination

@@ -5,6 +5,7 @@ Provides RESTful API for connection requests, acceptance, and management
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from typing import List, Optional
 from datetime import datetime
+import random
 from bson import ObjectId
 from app.middleware.auth_middleware import get_current_user
 from app.database import get_database
@@ -329,4 +330,71 @@ async def get_connection_status(
         return {"status": "request_sent"}
     
     return {"status": "not_connected"}
+
+
+@router.get("/suggestions/{user_id}", response_model=List[dict])
+async def get_connection_suggestions(
+    user_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get connection suggestions excluding self, existing connections, and pending requests."""
+    db = get_database()
+
+    # Always scope suggestions by the authenticated user.
+    owner_id = str(current_user.get("_id"))
+    if user_id != owner_id:
+        user_id = owner_id
+
+    current_connections = list(current_user.get("connections", []))
+    current_requests = list(current_user.get("connection_requests", []))
+
+    exclude_ids = set(current_connections + current_requests + [owner_id])
+    valid_exclude_ids = [ObjectId(uid) for uid in exclude_ids if ObjectId.is_valid(uid)]
+
+    candidates = await db.users.find(
+        {
+            "_id": {"$nin": valid_exclude_ids},
+        },
+        {
+            "first_name": 1,
+            "last_name": 1,
+            "headline": 1,
+            "location": 1,
+            "skills": 1,
+            "profile_picture": 1,
+            "user_type": 1,
+            "connections": 1,
+            "connection_requests": 1,
+        },
+    ).limit(200).to_list(length=200)
+
+    current_skills = {s.lower() for s in (current_user.get("skills") or []) if isinstance(s, str)}
+    current_headline = (current_user.get("headline") or "").lower()
+
+    suggestions = []
+    for user in candidates:
+        uid = str(user.get("_id"))
+        if not uid or uid in exclude_ids:
+            continue
+
+        user_pending = set(user.get("connection_requests", []))
+        user_connections = set(user.get("connections", []))
+
+        # Exclude users where there is already a request relationship either way.
+        if owner_id in user_pending or owner_id in user_connections:
+            continue
+
+        user_skills = {s.lower() for s in (user.get("skills") or []) if isinstance(s, str)}
+        shared_skills = len(current_skills.intersection(user_skills))
+        same_location = int((user.get("location") or "").lower() == (current_user.get("location") or "").lower())
+        headline_match = int(current_headline and current_headline in (user.get("headline") or "").lower())
+        social_boost = min(len(user_connections), 30) / 10
+
+        relevance = (shared_skills * 3) + (same_location * 2) + headline_match + social_boost + random.uniform(0, 1)
+        user["_relevance"] = relevance
+        suggestions.append(user)
+
+    suggestions.sort(key=lambda x: x.get("_relevance", 0), reverse=True)
+    return [user_to_dict(u) for u in suggestions[:limit]]
 

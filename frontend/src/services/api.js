@@ -180,7 +180,17 @@ export const userService = {
   },
   deleteProfilePicture: () => api.delete('/api/users/me/profile-picture'),
   // Legacy endpoints (kept for backward compatibility)
-  sendConnectionRequest: (userId) => api.post(`/api/users/${userId}/connect`),
+  sendConnectionRequest: async (userId) => {
+    try {
+      return await api.post('/api/connections/request', { user_id: userId });
+    } catch (error) {
+      // Backward-compat fallback for legacy backends.
+      if (error?.response?.status === 404) {
+        return api.post(`/api/users/${userId}/connect`);
+      }
+      throw error;
+    }
+  },
   acceptConnection: (userId) => api.post(`/api/users/${userId}/accept`),
   rejectConnection: (userId) => api.post(`/api/users/${userId}/reject`),
   declineConnection: (userId) => api.post(`/api/users/${userId}/decline`),
@@ -196,7 +206,14 @@ export const userService = {
   getMyConnections: (params) => api.get('/api/connections/me/connections', { params }),
   getIncomingRequests: () => api.get('/api/connections/me/requests/incoming'),
   getConnectionStatus: (userId) => api.get(`/api/connections/me/status/${userId}`),
-  getSuggestions: () => api.get('/api/users/suggestions/list'),
+  getSuggestions: () => {
+    const authUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const userId = authUser?.id || authUser?._id;
+    if (userId) {
+      return api.get(`/api/connections/suggestions/${userId}`);
+    }
+    return api.get('/api/users/suggestions/list');
+  },
   searchUsers: (params) => api.get('/api/users/search', { params }),
   getAtsScore: () => api.get('/api/users/me/ats-score'),
   uploadResume: (formData) => api.post('/api/users/upload/resume', formData, {
@@ -213,7 +230,18 @@ export const userService = {
 
 export const postService = {
   createPost: (data) => api.post('/api/posts', data),
-  createPostV2: (data) => api.post('/api/posts/create', data),
+  createPostV2: (data) => {
+    const formData = new FormData();
+    formData.append('content', data?.content || '');
+    if (data?.media instanceof File) {
+      formData.append('media', data.media);
+    }
+    return api.post('/api/posts/create', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
   getPosts: (params = {}) => {
     const { signal, ...rest } = params;
     return api.get('/api/posts', { params: rest, signal });

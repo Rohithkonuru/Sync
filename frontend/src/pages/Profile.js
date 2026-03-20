@@ -4,7 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 
 import { useAuth } from '../context/AuthContext';
 
-import { userService } from '../services/api';
+import { userService, postService } from '../services/api';
 
 import { FiUserPlus, FiCheck, FiEdit2, FiBriefcase, FiBook, FiAward, FiMapPin, FiX, FiTrash2, FiTrendingUp, FiFileText, FiUpload, FiRefreshCw } from 'react-icons/fi';
 
@@ -36,6 +36,8 @@ const Profile = () => {
   const [loadingAtsScore, setLoadingAtsScore] = useState(false);
 
   const [uploadingResume, setUploadingResume] = useState(false);
+  const [profilePosts, setProfilePosts] = useState([]);
+  const [loadingProfilePosts, setLoadingProfilePosts] = useState(false);
 
   const resumeInputRef = useRef(null);
 
@@ -58,6 +60,16 @@ const Profile = () => {
     }
 
   }, [user, isOwnProfile]);
+
+  useEffect(() => {
+
+    if (user?.id || user?._id) {
+
+      loadProfilePosts(user.id || user._id);
+
+    }
+
+  }, [user?.id, user?._id]);
 
 
 
@@ -140,6 +152,34 @@ const Profile = () => {
     } finally {
 
       setLoadingAtsScore(false);
+
+    }
+
+  };
+
+  const loadProfilePosts = async (profileId) => {
+
+    try {
+
+      setLoadingProfilePosts(true);
+
+      const feed = await postService.getFeed({ limit: 50, sort_by: 'recent' });
+
+      const posts = (Array.isArray(feed) ? feed : []).filter(
+
+        (post) => String(post.user_id) === String(profileId)
+
+      );
+
+      setProfilePosts(posts);
+
+    } catch (error) {
+
+      setProfilePosts([]);
+
+    } finally {
+
+      setLoadingProfilePosts(false);
 
     }
 
@@ -424,6 +464,36 @@ const Profile = () => {
             </div>
 
             <div>
+
+            {/* Stats */}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+
+              <div className="bg-white rounded-lg shadow-md p-4 text-center">
+
+                <p className="text-2xl font-bold text-primary-700">{user.connections?.length || 0}</p>
+
+                <p className="text-sm text-gray-600">Connections</p>
+
+              </div>
+
+              <div className="bg-white rounded-lg shadow-md p-4 text-center">
+
+                <p className="text-2xl font-bold text-primary-700">{user.profile_views || 0}</p>
+
+                <p className="text-sm text-gray-600">Profile Views</p>
+
+              </div>
+
+              <div className="bg-white rounded-lg shadow-md p-4 text-center">
+
+                <p className="text-2xl font-bold text-primary-700">{profilePosts.length}</p>
+
+                <p className="text-sm text-gray-600">Posts</p>
+
+              </div>
+
+            </div>
 
               <h1 className="text-3xl font-bold">
 
@@ -725,6 +795,64 @@ const Profile = () => {
             </div>
 
           )}
+
+          {/* Posts */}
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+
+            <h2 className="text-xl font-semibold mb-4">Posts</h2>
+
+            {loadingProfilePosts ? (
+
+              <div className="text-sm text-gray-500">Loading posts...</div>
+
+            ) : profilePosts.length === 0 ? (
+
+              <div className="text-sm text-gray-500">No posts published yet.</div>
+
+            ) : (
+
+              <div className="space-y-3">
+
+                {profilePosts.slice(0, 10).map((post) => (
+
+                  <div key={post.id || post._id} className="border border-gray-100 rounded-lg p-3">
+
+                    <p className="text-sm text-gray-800 break-words">{post.content || 'Media post'}</p>
+
+                    {post.media_url && post.media_type === 'image' && (
+
+                      <img
+
+                        src={post.media_url}
+
+                        alt="Post media"
+
+                        className="w-full h-auto rounded-lg object-cover mt-2"
+
+                      />
+
+                    )}
+
+                    {post.media_url && post.media_type === 'video' && (
+
+                      <video controls className="w-full rounded-lg mt-2">
+
+                        <source src={post.media_url} />
+
+                      </video>
+
+                    )}
+
+                  </div>
+
+                ))}
+
+              </div>
+
+            )}
+
+          </div>
 
         </div>
 
