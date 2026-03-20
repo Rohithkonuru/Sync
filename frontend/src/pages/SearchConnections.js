@@ -1,13 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { userService } from '../../services/api';
-import { FiSearch, FiUser, FiUserPlus, FiUserCheck, FiArrowRight, FiX, FiFilter, FiMapPin, FiAward, FiMessageCircle, FiChevronDown } from 'react-icons/fi';
+import { userService } from '../services/api';
+import { FiSearch, FiUser, FiUserPlus, FiUserCheck, FiX, FiFilter, FiMapPin, FiAward, FiMessageCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const SearchConnections = () => {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);

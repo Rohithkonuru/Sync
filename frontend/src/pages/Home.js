@@ -6,6 +6,16 @@ import JobSeekerDashboardEnhanced from '../components/dashboards/JobSeekerDashbo
 import ProfessionalDashboardEnhanced from '../components/dashboards/ProfessionalDashboardEnhanced';
 import RecruiterDashboardEnhanced from '../components/dashboards/RecruiterDashboardEnhanced';
 import AdminDashboard from '../components/dashboards/AdminDashboard';
+import MobileOptimizedDashboard from '../components/dashboards/MobileOptimizedDashboard';
+
+const ResponsiveDashboard = ({ desktop }) => (
+  <>
+    <div className="hidden md:block">{desktop}</div>
+    <div className="block md:hidden">
+      <MobileOptimizedDashboard />
+    </div>
+  </>
+);
 
 const Home = () => {
   const { user } = useAuth();
@@ -22,16 +32,16 @@ const Home = () => {
   // If user is authenticated, show appropriate dashboard
   if (user) {
     if (user.user_type === 'admin') {
-      return <AdminDashboard />;
+      return <ResponsiveDashboard desktop={<AdminDashboard />} />;
     } else if (user.user_type === 'recruiter') {
-      return <RecruiterDashboardEnhanced />;
+      return <ResponsiveDashboard desktop={<RecruiterDashboardEnhanced />} />;
     } else if (user.user_type === 'professional') {
-      return <ProfessionalDashboardEnhanced />;
+      return <ResponsiveDashboard desktop={<ProfessionalDashboardEnhanced />} />;
     } else if (user.user_type === 'student' || user.user_type === 'job_seeker') {
-      return <StudentDashboardEnhanced />;
+      return <ResponsiveDashboard desktop={<StudentDashboardEnhanced />} />;
     } else {
       // Default to student dashboard for any other role
-      return <StudentDashboardEnhanced />;
+      return <ResponsiveDashboard desktop={<StudentDashboardEnhanced />} />;
     }
   }
 

@@ -20,6 +20,7 @@ import ArticleCreatePage from './pages/ArticleCreatePage';
 import ProfileViewsPage from './pages/ProfileViewsPage';
 import SearchConnections from './pages/SearchConnections';
 import Navbar from './components/Navbar';
+import MobileBottomNav from './components/navigation/MobileBottomNav';
 import PrivateRoute from './components/PrivateRoute';
 import { AuthProvider } from './context/AuthContext';
 import { SocketProvider } from './context/SocketContext';
@@ -112,9 +113,12 @@ function App() {
                   path="/*"
                   element={
                     <PrivateRoute>
-                      <Navbar />
+                      <div className="hidden md:block">
+                        <Navbar />
+                      </div>
                       <Routes>
                         <Route path="/home" element={<Home />} />
+                        <Route path="/feed" element={<Home />} />
                         <Route path="/profile/:userId?" element={<Profile />} />
                         <Route path="/jobs" element={<Jobs />} />
                         <Route path="/jobs/create" element={<JobCreate />} />
@@ -135,6 +139,7 @@ function App() {
                         <Route path="/settings" element={<Settings />} />
                         <Route path="*" element={<Navigate to="/home" replace />} />
                       </Routes>
+                      <MobileBottomNav />
                     </PrivateRoute>
                   }
                 />
