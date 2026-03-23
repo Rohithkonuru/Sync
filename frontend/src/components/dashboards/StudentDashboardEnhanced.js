@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
-import { jobService, postService, userService, certificationService } from '../../services/api';
-import { getDashboardFeed } from '../../services/feedService';
+import { jobService, userService, certificationService } from '../../services/api';
 import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge, ProgressBar } from '../ui';
 import FeedCard from '../common/FeedCard';
@@ -39,7 +38,7 @@ import ProfileCard from '../ProfileCard';
  */
 const StudentDashboardEnhanced = () => {
   const { user, updateUser } = useAuth();
-  const { getFeed, setFeed, removePost, upsertPost } = useFeed();
+  const { posts, fetchFeed, addPost, deletePost, upsertPost } = useFeed();
   const navigate = useNavigate();
   
   // State - moved to top for ESLint recognition
@@ -310,6 +309,10 @@ const StudentDashboardEnhanced = () => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    setFeedPosts(Array.isArray(posts) ? posts : []);
+  }, [posts]);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -318,7 +321,7 @@ const StudentDashboardEnhanced = () => {
       const [internshipData, applicationData, postsData] = await Promise.all([
         jobService.getJobs({ job_type: 'internship', limit: 5 }).catch(() => []),
         jobService.getApplications({ limit: 5 }).catch(() => []),
-        getDashboardFeed({ limit: 10, include_demo: true }).catch(() => getFeed('all'))
+        fetchFeed({ limit: 10, sort_by: 'recent' }).catch(() => [])
       ]);
 
       setInternships(Array.isArray(internshipData) ? internshipData : []);
@@ -339,7 +342,6 @@ const StudentDashboardEnhanced = () => {
       });
       
       setFeedPosts(postsWithImages);
-      setFeed('all', postsWithImages);
       
     } catch (error) {
       console.error('Error loading student dashboard:', error);
@@ -753,19 +755,13 @@ const StudentDashboardEnhanced = () => {
                         currentUserId={user?._id || user?.id}
                         onPostUpdate={(postUpdate) => {
                           if (typeof postUpdate === 'string') {
-                            removePost(postUpdate);
-                            setFeedPosts((prev) => prev.filter((p) => (p.id || p._id) !== postUpdate));
+                            deletePost(postUpdate);
                             toast.success('Post deleted');
                             return;
                           }
 
                           if (postUpdate?.id || postUpdate?._id) {
-                            upsertPost('all', postUpdate);
-                            setFeedPosts((prev) => prev.map((p) =>
-                              String(p.id || p._id) === String(postUpdate.id || postUpdate._id)
-                                ? { ...p, ...postUpdate }
-                                : p
-                            ));
+                            upsertPost(postUpdate);
                           }
                         }}
                       />
@@ -924,41 +920,11 @@ const StudentDashboardEnhanced = () => {
                   try {
                     const payload = {
                       ...postData,
-                      user_id: user?._id,
                       post_type: postMode,
                       media_url: postData?.media_url || postData?.video_url || postData?.image_url || postData?.images?.[0],
-                      created_at: new Date().toISOString(),
                     };
 
-                    let newPost;
-                    try {
-                      newPost = await postService.createPost(payload);
-                    } catch {
-                      newPost = await postService.createPostV2(payload);
-                    }
-                    
-                    // Ensure the post has all required fields for display
-                    const processedPost = {
-                      id: newPost.id || newPost._id || new Date().getTime().toString(),
-                      user_id: newPost.user_id,
-                      user_name: newPost.user_name || `${user.first_name} ${user.last_name}`,
-                      user_picture: newPost.user_picture || user.profile_picture,
-                      content: newPost.content,
-                      images: newPost.images || [],
-                      media_url: newPost.media_url || postData?.media_url || postData?.images?.[0],
-                      media_type: newPost.media_type || (postMode === 'video' ? 'video' : (postData?.images?.length ? 'image' : undefined)),
-                      likes: newPost.likes || [],
-                      comments: newPost.comments || [],
-                      shares: newPost.shares || 0,
-                      created_at: newPost.created_at || new Date().toISOString(),
-                      updated_at: newPost.updated_at || new Date().toISOString()
-                    };
-                    
-                    setFeedPosts(prev => {
-                      const next = [processedPost, ...prev];
-                      setFeed('all', next);
-                      return next;
-                    });
+                    await addPost(payload);
                     setShowCreatePostModal(false);
                     setPostMode('text');
                     toast.success(TOAST_MESSAGES.POST_CREATED);

@@ -23,9 +23,11 @@ class PostCreate(PostBase):
 
 class PostResponse(BaseModel):
     id: str
+    _id: Optional[str] = None
     user_id: str
     user_name: str
     user_picture: Optional[str] = None
+    user_avatar: Optional[str] = None
     content: str
     images: List[str] = []
     certificate_id: Optional[str] = None
@@ -33,6 +35,8 @@ class PostResponse(BaseModel):
     media_type: Optional[str] = None
     likes: List[str] = []
     comments: List[Comment] = []
+    likes_count: int = 0
+    comments_count: int = 0
     shares: int = 0
     created_at: datetime
     updated_at: datetime

@@ -1,96 +1,112 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { postService } from '../services/api';
+import { createPost as createPostRequest, getFeed as getFeedRequest, normalizeFeed } from '../services/feedService';
 
 const FeedContext = createContext(null);
 
-const initialFeeds = {
-  all: [],
-  network: [],
-  saved: [],
-};
-
 export const FeedProvider = ({ children }) => {
-  const [feeds, setFeeds] = useState(initialFeeds);
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const normalizePostsPayload = useCallback((payload) => {
-    if (Array.isArray(payload)) return payload;
-    if (Array.isArray(payload?.posts)) return payload.posts;
-    if (Array.isArray(payload?.items)) return payload.items;
-    return [];
-  }, []);
-
-  const setFeed = useCallback((scope, dataOrUpdater) => {
-    setFeeds((prev) => {
-      const current = prev[scope] || [];
-      const nextValue = typeof dataOrUpdater === 'function' ? dataOrUpdater(current) : dataOrUpdater;
-      return {
-        ...prev,
-        [scope]: Array.isArray(nextValue) ? nextValue : [],
-      };
-    });
-  }, []);
-
-  const getFeed = useCallback((scope = 'all') => {
-    return feeds[scope] || [];
-  }, [feeds]);
+  const getPostId = useCallback((post) => String(post?.id || post?._id || ''), []);
 
   const fetchFeed = useCallback(async (params = {}) => {
-    let data;
+    setLoading(true);
+    setError(null);
     try {
-      data = await postService.getFeed(params);
-    } catch (primaryError) {
-      // Keep app functional if /feed has transient or version mismatch issues.
-      data = await postService.getPosts(params);
+      const data = await getFeedRequest(params);
+      const normalized = Array.isArray(data) ? data : [];
+      setPosts((current) => {
+        if ((params?.page || 1) > 1) {
+          const seen = new Set(current.map(getPostId));
+          const next = normalized.filter((post) => !seen.has(getPostId(post)));
+          return [...current, ...next];
+        }
+        return normalized;
+      });
+      return normalized;
+    } catch (requestError) {
+      console.error(requestError);
+      setError(requestError?.message || 'Failed to load feed data');
+      setPosts([]);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, [getPostId]);
+
+  const addPost = useCallback(async (payload) => {
+    try {
+      const createdPost = await createPostRequest(payload);
+      setPosts((current) => [createdPost, ...current]);
+      return createdPost;
+    } catch (requestError) {
+      console.error(requestError);
+      throw requestError;
+    }
+  }, []);
+
+  const deletePost = useCallback(async (postId, syncRemote = false) => {
+    const postKey = String(postId);
+    if (syncRemote && postKey) {
+      try {
+        await postService.deletePost(postKey);
+      } catch (requestError) {
+        console.error(requestError);
+      }
+    }
+    setPosts((current) => current.filter((post) => getPostId(post) !== postKey));
+  }, [getPostId]);
+
+  const upsertPost = useCallback((scopeOrPost, maybePost) => {
+    const incomingPost = maybePost || scopeOrPost;
+    if (!incomingPost) return;
+    const incomingId = getPostId(incomingPost);
+    if (!incomingId) return;
+
+    setPosts((current) => {
+      const exists = current.some((post) => getPostId(post) === incomingId);
+      if (!exists) return [incomingPost, ...current];
+      return current.map((post) => (getPostId(post) === incomingId ? { ...post, ...incomingPost } : post));
+    });
+  }, [getPostId]);
+
+  // Backward-compatible helpers used by some existing components.
+  const getFeed = useCallback(() => posts, [posts]);
+
+  const setFeed = useCallback((scopeOrUpdater, dataOrUpdater) => {
+    if (Array.isArray(scopeOrUpdater) || typeof scopeOrUpdater === 'function') {
+      setPosts((current) => {
+        const next = typeof scopeOrUpdater === 'function' ? scopeOrUpdater(current) : scopeOrUpdater;
+        return normalizeFeed(next);
+      });
+      return;
     }
 
-    const posts = normalizePostsPayload(data);
-
-    setFeed('all', (current) => {
-      if ((params?.page || 1) > 1) {
-        const seen = new Set(current.map((post) => String(post.id || post._id)));
-        const next = posts.filter((post) => !seen.has(String(post.id || post._id)));
-        return [...current, ...next];
-      }
-      return posts;
-    });
-    return posts;
-  }, [setFeed, normalizePostsPayload]);
-
-  const removePost = useCallback((postId) => {
-    const postKey = String(postId);
-    setFeeds((prev) => {
-      const next = {};
-      Object.keys(prev).forEach((scope) => {
-        next[scope] = (prev[scope] || []).filter((post) => String(post.id || post._id) !== postKey);
-      });
-      return next;
+    const updater = dataOrUpdater;
+    setPosts((current) => {
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return normalizeFeed(next);
     });
   }, []);
 
-  const upsertPost = useCallback((scope, incomingPost) => {
-    if (!incomingPost) return;
-    const incomingId = String(incomingPost.id || incomingPost._id || '');
-    if (!incomingId) return;
-
-    setFeed(scope, (current) => {
-      const exists = current.some((post) => String(post.id || post._id) === incomingId);
-      if (!exists) {
-        return [incomingPost, ...current];
-      }
-      return current.map((post) =>
-        String(post.id || post._id) === incomingId ? { ...post, ...incomingPost } : post
-      );
-    });
-  }, [setFeed]);
+  const removePost = useCallback((postId) => {
+    deletePost(postId, false);
+  }, [deletePost]);
 
   const value = useMemo(() => ({
-    feeds,
-    setFeed,
-    getFeed,
+    posts,
+    loading,
+    error,
     fetchFeed,
-    removePost,
+    addPost,
+    deletePost,
     upsertPost,
-  }), [feeds, setFeed, getFeed, fetchFeed, removePost, upsertPost]);
+    getFeed,
+    setFeed,
+    removePost,
+  }), [posts, loading, error, fetchFeed, addPost, deletePost, upsertPost, getFeed, setFeed, removePost]);
 
   return <FeedContext.Provider value={value}>{children}</FeedContext.Provider>;
 };

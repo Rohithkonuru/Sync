@@ -229,7 +229,28 @@ export const userService = {
 };
 
 export const postService = {
-  createPost: (data) => api.post('/api/posts', data),
+  createPost: (data = {}) => {
+    const formData = new FormData();
+    formData.append('content', data?.content || '');
+    if (data?.media instanceof File) {
+      formData.append('media', data.media);
+    }
+    if (data?.media_url) {
+      formData.append('media_url', data.media_url);
+    }
+    if (data?.media_type) {
+      formData.append('media_type', data.media_type);
+    }
+    if (Array.isArray(data?.images) && data.images.length > 0 && !data?.media_url) {
+      formData.append('media_url', data.images[0]);
+      formData.append('media_type', data?.media_type || 'image');
+    }
+    return api.post('/api/posts/create', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
   createPostV2: (data) => {
     const formData = new FormData();
     formData.append('content', data?.content || '');

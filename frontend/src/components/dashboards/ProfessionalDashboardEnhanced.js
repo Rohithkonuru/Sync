@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { postService, eventService, subscriptionService, interviewService } from '../../services/api';
+import { eventService, subscriptionService, interviewService } from '../../services/api';
 import { useFeed } from '../../context/FeedContext';
-import { getFeedByTab } from '../../services/feedService';
 import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge } from '../ui';
 import FeedCard from '../common/FeedCard';
@@ -49,11 +48,9 @@ const INITIAL_INTERVIEW_INVITES = [
 
 const ProfessionalDashboardEnhanced = () => {
   const { user, updateUser } = useAuth();
-  const { setFeed, getFeed, removePost, upsertPost } = useFeed();
+  const { posts, fetchFeed, addPost, deletePost, upsertPost } = useFeed();
   const navigate = useNavigate();
-  const userId = user?._id || user?.id;
 
-  const [posts, setPosts] = useState([]);
   const [stats, setStats] = useState({
     profileViews: 1247,
     postImpressions: 3892,
@@ -87,28 +84,22 @@ const ProfessionalDashboardEnhanced = () => {
         setFeedLoading(true);
       }
 
-      const cached = getFeed(tab);
-      if (Array.isArray(cached) && cached.length > 0 && !isInitial) {
-        setPosts(cached);
-        setFilteredPosts(cached);
-      }
-
-      const data = await getFeedByTab(tab, userId, { limit: 10, include_recommended: true });
-
+      const data = await fetchFeed({ limit: 10, sort_by: 'recent' });
       const nextPosts = Array.isArray(data) ? data : [];
-      setFeed(tab, nextPosts);
-      setPosts(nextPosts);
       setFilteredPosts(nextPosts);
     } catch (error) {
       console.error('Error loading feed:', error);
       toast.error(error?.message || TOAST_MESSAGES.FEED_LOAD_FAILED);
-      setPosts([]);
       setFilteredPosts([]);
     } finally {
       setLoading(false);
       setFeedLoading(false);
     }
-  }, [getFeed, setFeed, userId]);
+  }, [fetchFeed]);
+
+  useEffect(() => {
+    setFilteredPosts(Array.isArray(posts) ? posts : []);
+  }, [posts]);
 
   useEffect(() => {
     const initialize = async () => {
@@ -144,14 +135,7 @@ const ProfessionalDashboardEnhanced = () => {
         media_type: postType === 'video' ? 'video' : (postData.images?.length ? 'image' : undefined),
       };
 
-      const newPost = await postService.createPost(payload);
-      const nextPosts = [newPost, ...posts];
-      setFeed(activeFeedTab, nextPosts);
-      if (activeFeedTab !== 'all') {
-        upsertPost('all', newPost);
-      }
-      setPosts(nextPosts);
-      setFilteredPosts(nextPosts);
+      await addPost(payload);
       setShowPostModal(false);
       setPostType('text');
       toast.success(TOAST_MESSAGES.POST_CREATED);
@@ -444,21 +428,13 @@ const ProfessionalDashboardEnhanced = () => {
                       currentUserId={user?._id || user?.id}
                       onPostUpdate={(postUpdate) => {
                         if (typeof postUpdate === 'string') {
-                          removePost(postUpdate);
-                          setPosts((prev) => prev.filter((p) => String(p.id || p._id) !== String(postUpdate)));
-                          setFilteredPosts((prev) => prev.filter((p) => String(p.id || p._id) !== String(postUpdate)));
+                          deletePost(postUpdate);
                           toast.success('Post deleted');
                           return;
                         }
 
                         if (postUpdate?.id || postUpdate?._id) {
-                          upsertPost(activeFeedTab, postUpdate);
-                          setPosts((prev) => prev.map((p) =>
-                            String(p.id || p._id) === String(postUpdate.id || postUpdate._id) ? { ...p, ...postUpdate } : p
-                          ));
-                          setFilteredPosts((prev) => prev.map((p) =>
-                            String(p.id || p._id) === String(postUpdate.id || postUpdate._id) ? { ...p, ...postUpdate } : p
-                          ));
+                          upsertPost(postUpdate);
                         }
                       }}
                     />

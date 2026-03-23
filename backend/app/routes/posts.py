@@ -1,9 +1,8 @@
 import os
 import uuid
-import random
 from fastapi import APIRouter, HTTPException, status, Depends, Query, File, UploadFile, Form
 from typing import List
-from datetime import datetime, timedelta
+from datetime import datetime
 from bson import ObjectId
 from app.models.post import PostCreate, PostResponse, Comment
 from app.middleware.auth_middleware import get_current_user
@@ -49,9 +48,11 @@ def post_to_dict(post: dict) -> dict:
 
     return {
         "id": str(post["_id"]),
+        "_id": str(post["_id"]),
         "user_id": post.get("user_id"),
         "user_name": post.get("user_name"),
         "user_picture": post.get("user_picture") or post.get("user_avatar"),
+        "user_avatar": post.get("user_avatar") or post.get("user_picture"),
         "user_role": post.get("user_role", "professional"),
         "user_headline": post.get("user_headline", ""),
         "content": post.get("content", ""),
@@ -198,17 +199,23 @@ async def create_post(post_data: PostCreate, current_user: dict = Depends(get_cu
 async def create_post_with_form_data(
     content: str = Form(""),
     media: UploadFile = File(None),
+    media_url: str = Form(None),
+    media_type: str = Form(None),
     current_user: dict = Depends(get_current_user)
 ):
     """Create a post using multipart/form-data (mobile-safe upload path)."""
     try:
         media_url = None
-        media_type = None
+        resolved_media_type = None
         images = []
 
         if media is not None:
-            media_url, media_type = await _save_uploaded_media(media)
-            if media_type == "image":
+            media_url, resolved_media_type = await _save_uploaded_media(media)
+            if resolved_media_type == "image":
+                images = [media_url]
+        elif media_url:
+            resolved_media_type = media_type or "image"
+            if resolved_media_type == "image":
                 images = [media_url]
 
         if not (content or media_url):
@@ -221,7 +228,7 @@ async def create_post_with_form_data(
             content=content,
             images=images,
             media_url=media_url,
-            media_type=media_type,
+            media_type=resolved_media_type,
         )
         return await create_post(payload, current_user)
     except HTTPException:
@@ -234,10 +241,18 @@ async def create_post_with_form_data(
 async def create_post_with_form_data_legacy(
     content: str = Form(""),
     media: UploadFile = File(None),
+    media_url: str = Form(None),
+    media_type: str = Form(None),
     current_user: dict = Depends(get_current_user)
 ):
     """Legacy compatibility alias for multipart post creation."""
-    return await create_post_with_form_data(content=content, media=media, current_user=current_user)
+    return await create_post_with_form_data(
+        content=content,
+        media=media,
+        media_url=media_url,
+        media_type=media_type,
+        current_user=current_user,
+    )
 
 @router.get("", response_model=List[PostResponse])
 async def get_posts(
@@ -247,79 +262,15 @@ async def get_posts(
     include_demo: bool = Query(False),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get feed posts (from connections and self) with relevance ranking"""
-    db = get_database()
-    connections = current_user.get("connections", [])
-    connections.append(str(current_user["_id"]))
-
-    # Fetch posts from connections
-    posts = await db.posts.find({
-        "user_id": {"$in": connections}
-    }).to_list(length=None)
-
-    # If no posts and demo is requested, get demo data
-    if (not posts or len(posts) == 0) and include_demo:
-        from app.services.demo_feed import get_demo_feed
-        user_type = current_user.get("user_type", "professional")
-        demo_posts = get_demo_feed(user_type, limit)
-        # Convert demo posts to the expected format
-        posts = []
-        for i, demo_post in enumerate(demo_posts):
-            demo_post["_id"] = demo_post.get("id", f"demo-{uuid.uuid4()}")
-            demo_post["user_id"] = demo_post.get("user_id", f"user-{i}")
-            demo_post["user_name"] = demo_post["user_name"]
-            demo_post["user_picture"] = demo_post.get("user_picture")
-            
-            # Add headline if missing
-            if not demo_post.get("user_headline"):
-                demo_post["user_headline"] = f"{demo_post.get('user_type', 'Professional')} at Demo Corp"
-            
-            demo_post["content"] = demo_post["content"]
-            demo_post["images"] = demo_post.get("images", [])
-            demo_post["likes"] = demo_post.get("likes", [])
-            demo_post["comments"] = demo_post.get("comments", [])
-            demo_post["shares"] = demo_post.get("shares", 0)
-            
-            # Stagger timestamps (random hours ago within last 3 days)
-            hours_ago = random.randint(1, 72)
-            created_at = datetime.utcnow() - timedelta(hours=hours_ago)
-            demo_post["created_at"] = created_at
-            demo_post["updated_at"] = created_at
-            
-            posts.append(demo_post)
-
-    # Calculate relevance score for each post
-    if sort_by == "relevance":
-        for post in posts:
-            # Relevance score = (likes * 2) + comments + (shares * 3) + recency_factor
-            likes_count = _count_items(post.get("likes", []))
-            comments_count = _count_items(post.get("comments", []))
-            shares_count = post.get("shares", 0)
-
-            # Recency factor: more recent = higher score (decay over 7 days)
-            from datetime import timedelta
-            days_old = (datetime.utcnow() - post.get("created_at", datetime.utcnow())).days
-            recency_factor = max(0, 10 - days_old)  # Decay over 10 days
-
-            post["_relevance_score"] = (likes_count * 2) + comments_count + (shares_count * 3) + recency_factor
-
-        # Sort by relevance score (descending)
-        posts.sort(key=lambda x: x.get("_relevance_score", 0), reverse=True)
-    else:
-        # Sort by created_at (most recent first)
-        posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
-
-    # Apply pagination
-    paginated_posts = posts[skip:skip + limit]
-
-    # Remove relevance score and enrich with user data before returning
-    enriched_posts = []
-    for post in paginated_posts:
-        post.pop("_relevance_score", None)
-        enriched_post = await enrich_post_with_user_data(post)
-        enriched_posts.append(enriched_post)
-
-    return [post_to_dict(post) for post in enriched_posts]
+    """Compatibility alias to canonical global feed endpoint."""
+    _ = include_demo
+    return await get_feed(
+        skip=skip,
+        limit=limit,
+        sort_by=sort_by,
+        include_recommended=True,
+        current_user=current_user,
+    )
 
 @router.get("/{post_id}", response_model=PostResponse)
 async def get_post(post_id: str):
@@ -630,26 +581,11 @@ async def get_feed(
     # Global feed: include all posts and prioritize with scoring when requested.
     all_posts = await db.posts.find({}).to_list(length=500)
     
-    # Calculate relevance score for each post
-    if sort_by == "relevance":
-        for post in all_posts:
-            likes_count = _count_items(post.get("likes", []))
-            comments_count = _count_items(post.get("comments", []))
-            shares_count = post.get("shares", 0)
-
-            days_old = (datetime.utcnow() - post.get("created_at", datetime.utcnow())).days
-            recency_factor = max(0, 14 - days_old)
-
-            is_connection = post.get("user_id") in connections
-            connection_boost = 8 if is_connection else 0
-            popularity_boost = min((likes_count + comments_count + (shares_count * 2)), 20)
-
-            post["_relevance_score"] = connection_boost + popularity_boost + recency_factor
-
-        all_posts.sort(key=lambda x: x.get("_relevance_score", 0), reverse=True)
-    else:
-        # Required stable global ordering by recency.
-        all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
+    _ = sort_by
+    _ = include_recommended
+    _ = connections
+    # Canonical feed ordering: newest posts first for all dashboards.
+    all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
     
     # Apply pagination
     paginated_posts = all_posts[skip:skip + limit]

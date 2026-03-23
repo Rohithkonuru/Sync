@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiPlus, FiSearch, FiX } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { useFeed } from '../../context/FeedContext';
-import { postService, userService } from '../../services/api';
+import { userService } from '../../services/api';
 import FeedCard from '../common/FeedCard';
 import UserCard from '../common/UserCard';
 import PostComposer from '../PostComposer';
@@ -13,7 +13,7 @@ const PAGE_SIZE = 10;
 
 const MobileOptimizedDashboard = () => {
   const navigate = useNavigate();
-  const { fetchFeed, removePost, upsertPost } = useFeed();
+  const { posts, fetchFeed, addPost, deletePost, upsertPost } = useFeed();
 
   const [feedPosts, setFeedPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +70,12 @@ const MobileOptimizedDashboard = () => {
     loadSuggestions();
   }, []);
 
+  useEffect(() => {
+    if (Array.isArray(posts)) {
+      setFeedPosts(posts);
+    }
+  }, [posts]);
+
   const loadSuggestions = async () => {
     try {
       const data = await userService.getSuggestions();
@@ -98,9 +104,8 @@ const MobileOptimizedDashboard = () => {
 
   const handlePostCreated = async (payload) => {
     try {
-      const createdPost = await postService.createPost(payload);
-      setFeedPosts((prev) => [createdPost, ...prev]);
-      upsertPost('all', createdPost);
+      const createdPost = await addPost(payload);
+      upsertPost(createdPost);
       setShowPostComposer(false);
       toast.success('Post created');
     } catch {
@@ -124,8 +129,8 @@ const MobileOptimizedDashboard = () => {
   };
 
   const handleDeletePost = (postId) => {
-    setFeedPosts((prev) => prev.filter((p) => p._id !== postId));
-    removePost(postId);
+    setFeedPosts((prev) => prev.filter((p) => getPostId(p) !== String(postId)));
+    deletePost(postId);
   };
 
   return (

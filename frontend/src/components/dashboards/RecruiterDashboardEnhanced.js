@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useFeed } from '../../context/FeedContext';
 import { jobService } from '../../services/api';
 import { Button, Card, Badge } from '../ui';
 import { FiBriefcase, FiUsers, FiTrendingUp, FiPlus, FiEdit2, FiTrash2, FiEye, FiRefreshCw } from 'react-icons/fi';
+import FeedCard from '../common/FeedCard';
 import toast from 'react-hot-toast';
 
 const RecruiterDashboardEnhanced = () => {
   const { user } = useAuth();
+  const { posts, fetchFeed, deletePost, upsertPost } = useFeed();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -28,6 +31,7 @@ const RecruiterDashboardEnhanced = () => {
   // Load jobs on mount and when returning from job creation
   useEffect(() => {
     loadJobs();
+    fetchFeed({ limit: 10, sort_by: 'recent' }).catch(() => []);
   }, []);
 
   // Handle refresh when returning from job creation
@@ -360,6 +364,37 @@ const RecruiterDashboardEnhanced = () => {
                         )}
                       </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Community Feed</h3>
+                <Badge variant="secondary">{(posts || []).length}</Badge>
+              </div>
+
+              {(posts || []).length === 0 ? (
+                <p className="text-sm text-gray-500">No feed posts yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {(posts || []).slice(0, 5).map((post) => (
+                    <FeedCard
+                      key={post.id || post._id}
+                      post={post}
+                      currentUserId={user?._id || user?.id}
+                      onPostUpdate={(postUpdate) => {
+                        if (typeof postUpdate === 'string') {
+                          deletePost(postUpdate);
+                          return;
+                        }
+
+                        if (postUpdate?.id || postUpdate?._id) {
+                          upsertPost(postUpdate);
+                        }
+                      }}
+                    />
                   ))}
                 </div>
               )}

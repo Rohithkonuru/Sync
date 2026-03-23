@@ -1,4 +1,4 @@
-import { postService } from './api';
+import api, { postService } from './api';
 import { handleApiError } from '../utils/errorHandler';
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
@@ -34,10 +34,44 @@ const toFeedError = (error, fallback) => {
 
 export const getFeed = async (params = {}) => {
   try {
-    const data = await postService.getFeed(params);
+    const data = await api.get('/api/posts/feed', { params });
     return normalizeFeed(data);
   } catch (error) {
     throw toFeedError(error, 'Failed to load feed data');
+  }
+};
+
+export const createPost = async (payload = {}) => {
+  try {
+    const formData = new FormData();
+    formData.append('content', payload?.content || '');
+
+    if (payload?.media instanceof File) {
+      formData.append('media', payload.media);
+    }
+
+    if (payload?.media_url) {
+      formData.append('media_url', payload.media_url);
+    }
+
+    if (payload?.media_type) {
+      formData.append('media_type', payload.media_type);
+    }
+
+    if (Array.isArray(payload?.images) && payload.images.length > 0 && !payload?.media_url) {
+      formData.append('media_url', payload.images[0]);
+      formData.append('media_type', payload?.media_type || 'image');
+    }
+
+    const data = await api.post('/api/posts/create', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return normalizeFeedPost(data);
+  } catch (error) {
+    throw toFeedError(error, 'Failed to create post');
   }
 };
 
@@ -62,16 +96,11 @@ export const getSavedFeed = async (userId, params = {}) => {
 };
 
 export const getDashboardFeed = async (params = {}) => {
-  try {
-    const data = await postService.getPosts(params);
-    return normalizeFeed(data);
-  } catch (error) {
-    throw toFeedError(error, 'Failed to load feed data');
-  }
+  return getFeed(params);
 };
 
 export const getFeedByTab = async (tab, userId, params = {}) => {
-  if (tab === 'network') return getNetworkFeed(userId, params);
-  if (tab === 'saved') return getSavedFeed(userId, params);
+  if (tab === 'network') return getFeed(params);
+  if (tab === 'saved') return getFeed(params);
   return getFeed(params);
 };
