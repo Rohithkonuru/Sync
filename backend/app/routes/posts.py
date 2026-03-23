@@ -272,6 +272,37 @@ async def get_posts(
         current_user=current_user,
     )
 
+@router.get("/feed", response_model=List[PostResponse])
+async def get_feed(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    sort_by: str = Query("recent", regex="^(recent|relevance)$"),
+    include_recommended: bool = Query(True),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get global feed sorted by recency for all dashboards."""
+    db = get_database()
+    user_id = str(current_user["_id"])
+    connections = set(current_user.get("connections", []))
+    connections.add(user_id)
+
+    all_posts = await db.posts.find({}).to_list(length=500)
+
+    _ = sort_by
+    _ = include_recommended
+    _ = connections
+    all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
+
+    paginated_posts = all_posts[skip:skip + limit]
+
+    enriched_posts = []
+    for post in paginated_posts:
+        post.pop("_relevance_score", None)
+        enriched_post = await enrich_post_with_user_data(post)
+        enriched_posts.append(enriched_post)
+
+    return [post_to_dict(post) for post in enriched_posts]
+
 @router.get("/{post_id}", response_model=PostResponse)
 async def get_post(post_id: str):
     """Get post by ID"""
@@ -562,41 +593,6 @@ async def get_network_feed(
         enriched_post = await enrich_post_with_user_data(post)
         enriched_posts.append(enriched_post)
 
-    return [post_to_dict(post) for post in enriched_posts]
-
-@router.get("/feed", response_model=List[PostResponse])
-async def get_feed(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("recent", regex="^(recent|relevance)$"),
-    include_recommended: bool = Query(True),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get global feed with connection boost, popularity boost, and recency ordering."""
-    db = get_database()
-    user_id = str(current_user["_id"])
-    connections = set(current_user.get("connections", []))
-    connections.add(user_id)
-
-    # Global feed: include all posts and prioritize with scoring when requested.
-    all_posts = await db.posts.find({}).to_list(length=500)
-    
-    _ = sort_by
-    _ = include_recommended
-    _ = connections
-    # Canonical feed ordering: newest posts first for all dashboards.
-    all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
-    
-    # Apply pagination
-    paginated_posts = all_posts[skip:skip + limit]
-    
-    # Remove relevance score and enrich with user data before returning
-    enriched_posts = []
-    for post in paginated_posts:
-        post.pop("_relevance_score", None)
-        enriched_post = await enrich_post_with_user_data(post)
-        enriched_posts.append(enriched_post)
-    
     return [post_to_dict(post) for post in enriched_posts]
 
 
