@@ -12,6 +12,13 @@ const initialFeeds = {
 export const FeedProvider = ({ children }) => {
   const [feeds, setFeeds] = useState(initialFeeds);
 
+  const normalizePostsPayload = useCallback((payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.posts)) return payload.posts;
+    if (Array.isArray(payload?.items)) return payload.items;
+    return [];
+  }, []);
+
   const setFeed = useCallback((scope, dataOrUpdater) => {
     setFeeds((prev) => {
       const current = prev[scope] || [];
@@ -28,16 +35,26 @@ export const FeedProvider = ({ children }) => {
   }, [feeds]);
 
   const fetchFeed = useCallback(async (params = {}) => {
-    const data = await postService.getFeed(params);
-    const posts = Array.isArray(data) ? data : [];
+    let data;
+    try {
+      data = await postService.getFeed(params);
+    } catch (primaryError) {
+      // Keep app functional if /feed has transient or version mismatch issues.
+      data = await postService.getPosts(params);
+    }
+
+    const posts = normalizePostsPayload(data);
+
     setFeed('all', (current) => {
       if ((params?.page || 1) > 1) {
-        return [...current, ...posts];
+        const seen = new Set(current.map((post) => String(post.id || post._id)));
+        const next = posts.filter((post) => !seen.has(String(post.id || post._id)));
+        return [...current, ...next];
       }
       return posts;
     });
     return posts;
-  }, [setFeed]);
+  }, [setFeed, normalizePostsPayload]);
 
   const removePost = useCallback((postId) => {
     const postKey = String(postId);

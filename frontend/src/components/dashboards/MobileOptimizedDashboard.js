@@ -27,6 +27,8 @@ const MobileOptimizedDashboard = () => {
 
   const feedEndRef = useRef(null);
 
+  const getPostId = (post) => String(post?.id || post?._id || '');
+
   const loadInitialFeed = async () => {
     try {
       setLoading(true);
@@ -198,7 +200,7 @@ const MobileOptimizedDashboard = () => {
           <div className="space-y-3 px-3 pb-4">
             {feedPosts.map((post) => (
               <motion.div
-                key={post._id}
+                key={getPostId(post)}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25 }}
@@ -206,9 +208,10 @@ const MobileOptimizedDashboard = () => {
               >
                 <FeedCard
                   post={post}
-                  onDelete={() => handleDeletePost(post._id)}
+                  onDelete={() => handleDeletePost(getPostId(post))}
                   onUpdate={(updatedPost) => {
-                    setFeedPosts((prev) => prev.map((p) => (p._id === updatedPost._id ? updatedPost : p)));
+                    const updatedId = getPostId(updatedPost);
+                    setFeedPosts((prev) => prev.map((p) => (getPostId(p) === updatedId ? updatedPost : p)));
                   }}
                 />
               </motion.div>
