@@ -21,11 +21,22 @@ const Feed = () => {
 
   const resolveImageUrl = (url) => {
     if (!url) return url;
+    if (url.startsWith('/api/')) {
+      const base = process.env.REACT_APP_API_URL || 'https://sync-backend-production.up.railway.app';
+      return `${base}${url}`;
+    }
     if (url.startsWith('/uploads/')) {
-      const base = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+      const base = process.env.REACT_APP_API_URL || 'https://sync-backend-production.up.railway.app';
       return `${base}${url}`;
     }
     return url;
+  };
+
+  const normalizePostsPayload = (payload) => {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.posts)) return payload.posts;
+    if (Array.isArray(payload?.items)) return payload.items;
+    return [];
   };
 
   const fetchPosts = useCallback((opts = { append: false }) => {
@@ -39,17 +50,27 @@ const Feed = () => {
       setLoadingMore(true);
     }
 
-    postService
-      .getPosts({ skip, limit, signal: controller.signal })
+    const load = async () => {
+      // Prefer global feed endpoint; fallback to legacy posts endpoint.
+      try {
+        return await postService.getFeed({ skip, limit, sort_by: 'recent', signal: controller.signal });
+      } catch (primaryError) {
+        return postService.getPosts({ skip, limit, signal: controller.signal });
+      }
+    };
+
+    load()
       .then((response = []) => {
-        const safeArray = Array.isArray(response) ? response : [];
+        const safeArray = normalizePostsPayload(response);
         setPosts((prev) => (opts.append ? [...prev, ...safeArray] : safeArray));
         setHasMore(safeArray.length === limit);
       })
       .catch((fetchError) => {
         if (fetchError.name === 'AbortError') return;
         console.error('Error fetching posts:', fetchError);
-        setError('Failed to load posts');
+        setPosts((prev) => (opts.append ? prev : []));
+        setHasMore(false);
+        setError('Failed to load posts. Please try again.');
         toast.error('Failed to load posts');
       })
       .finally(() => {
@@ -288,7 +309,7 @@ const Feed = () => {
                 <motion.img
                   src={resolveImageUrl(post.media_url)}
                   alt="Post media"
-                  className="w-full rounded-lg"
+                  className="w-full h-auto rounded-lg object-cover"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.2 }}
