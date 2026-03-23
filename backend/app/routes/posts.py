@@ -11,6 +11,7 @@ from app.services.auth import get_user_by_id, user_to_dict
 from app.services.notifications import create_notification
 from app.services.sync_score import SyncScoreService
 from app.services.socket_manager import broadcast_post
+from app.services.feed_ranking import calculate_feed_score
 
 router = APIRouter()
 
@@ -65,7 +66,8 @@ def post_to_dict(post: dict) -> dict:
         "comments_count": _count_items(post.get("comments", [])),
         "shares": post.get("shares", 0),
         "created_at": post.get("created_at") or datetime.utcnow(),
-        "updated_at": post.get("updated_at") or post.get("created_at") or datetime.utcnow()
+        "updated_at": post.get("updated_at") or post.get("created_at") or datetime.utcnow(),
+        "ai_score": post.get("ai_score", 0)
     }
 
 async def enrich_post_with_user_data(post: dict) -> dict:
@@ -278,7 +280,7 @@ async def get_posts(
 async def get_feed(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    sort_by: str = Query("recent", regex="^(recent|relevance)$"),
+    sort_by: str = Query("recent", regex="^(recent|relevance|ranked)$"),
     include_recommended: bool = Query(True),
     current_user: dict = Depends(get_current_user)
 ):
@@ -297,10 +299,30 @@ async def get_feed(
 
     all_posts = await db.posts.find({}).to_list(length=500)
 
-    _ = sort_by
     _ = include_recommended
     _ = connections
-    all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
+
+    # Apply sorting based on sort_by parameter
+    if sort_by == "ranked":
+        # AI-based ranking
+        scored_posts = []
+        for post in all_posts:
+            score = await calculate_feed_score(post, current_user)
+            post["ai_score"] = score
+            scored_posts.append((score, post))
+        scored_posts.sort(key=lambda x: x[0], reverse=True)
+        all_posts = [post for _, post in scored_posts]
+    elif sort_by == "relevance":
+        # Sort by connections + recency
+        all_posts.sort(
+            key=lambda x: (
+                x.get("user_id") in connections,
+                x.get("created_at", datetime.utcnow())
+            ),
+            reverse=True
+        )
+    else:  # recent (default)
+        all_posts.sort(key=lambda x: x.get("created_at", datetime.utcnow()), reverse=True)
 
     paginated_posts = all_posts[skip:skip + limit]
 

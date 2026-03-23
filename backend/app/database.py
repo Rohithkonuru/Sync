@@ -1,6 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import HTTPException, status
 from app.config import settings
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -65,4 +66,25 @@ def get_messages_collection():
 
 def get_notifications_collection():
     return get_database().notifications
+
+
+async def ensure_indexes():
+    """Create the lightweight indexes required for feed + notification performance."""
+    if database.client is None:
+        return
+
+    try:
+        db = get_database()
+    except HTTPException:
+        return
+
+    try:
+        await asyncio.gather(
+            db.posts.create_index([("created_at", -1)]),
+            db.posts.create_index([("user_id", 1), ("created_at", -1)]),
+            db.notifications.create_index([("user_id", 1), ("created_at", -1)]),
+            db.notifications.create_index([("user_id", 1), ("read", 1)]),
+        )
+    except Exception as exc:
+        logger.warning("Unable to ensure MongoDB indexes: %s", exc)
 

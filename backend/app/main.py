@@ -5,9 +5,23 @@ from fastapi.responses import FileResponse
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-from app.routes import auth, users, posts, jobs, messages, companies, notifications, connections, analytics, events, subscriptions, interviews
+from app.routes import (
+    auth,
+    users,
+    posts,
+    jobs,
+    messages,
+    companies,
+    notifications,
+    connections,
+    analytics,
+    events,
+    subscriptions,
+    interviews,
+    realtime,
+)
 from app.services.socket_manager import sio
-from app.database import connect_to_mongo, close_mongo_connection
+from app.database import connect_to_mongo, close_mongo_connection, ensure_indexes, get_database
 from socketio import ASGIApp
 
 load_dotenv()
@@ -18,6 +32,7 @@ app = FastAPI(title="Sync API", version="1.0.0")
 async def startup_event():
     """Initialize database connection on startup"""
     await connect_to_mongo()  # Will print warnings but not crash if MongoDB unavailable
+    await ensure_indexes()
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -64,6 +79,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"]
 app.include_router(events.router, prefix="/api/events", tags=["Events"])
 app.include_router(subscriptions.router, prefix="/api/subscriptions", tags=["Subscriptions"])
 app.include_router(interviews.router, prefix="/api/interviews", tags=["Interviews"])
+app.include_router(realtime.router, tags=["Realtime"])
 
 # Socket.io integration
 # Wrap FastAPI app with Socket.io

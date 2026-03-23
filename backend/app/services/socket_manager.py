@@ -1,7 +1,16 @@
+import asyncio
+import json
+import logging
+from collections import defaultdict
+from datetime import datetime
+from typing import Dict, Iterable, Optional, Set
+
+from bson import ObjectId
+from fastapi import WebSocket
 import socketio
 from jose import jwt
+
 from app.config import settings
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +20,81 @@ socket_manager = socketio.ASGIApp(sio)
 # Store user_id to sid mapping
 user_sessions = {}  # {user_id: [sid1, sid2, ...]}
 
+class WebSocketConnectionManager:
+    """Lightweight manager to track and message FastAPI WebSocket clients."""
+
+    def __init__(self):
+        self.active_connections: Dict[str, Set[WebSocket]] = defaultdict(set)
+        self._lock = asyncio.Lock()
+
+    async def connect(self, user_id: str, websocket: WebSocket):
+        await websocket.accept()
+        async with self._lock:
+            self.active_connections[user_id].add(websocket)
+        logger.info("WebSocket connected for user %s", user_id)
+
+    async def disconnect(self, user_id: str, websocket: WebSocket):
+        async with self._lock:
+            connections = self.active_connections.get(user_id)
+            if connections and websocket in connections:
+                connections.remove(websocket)
+                if not connections:
+                    self.active_connections.pop(user_id, None)
+        logger.info("WebSocket disconnected for user %s", user_id)
+
+    async def send_personal_message(self, user_id: str, message: str):
+        async with self._lock:
+            connections = list(self.active_connections.get(user_id, set()))
+        for connection in connections:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                await self.disconnect(user_id, connection)
+
+    async def broadcast(self, message: str):
+        async with self._lock:
+            pairs = [(user_id, list(conns)) for user_id, conns in self.active_connections.items()]
+        for user_id, connections in pairs:
+            for connection in connections:
+                try:
+                    await connection.send_text(message)
+                except Exception:
+                    await self.disconnect(user_id, connection)
+
+websocket_manager = WebSocketConnectionManager()
+
+def _json_default(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, ObjectId):
+        return str(value)
+    raise TypeError(f"Type {type(value)} not serializable")
+
+def _prepare_payload(payload: dict) -> dict:
+    try:
+        return json.loads(json.dumps(payload, default=_json_default))
+    except TypeError:
+        # As a fallback, stringify everything
+        return json.loads(json.dumps(payload, default=str))
+
+async def emit_event(event_type: str, payload: dict, user_ids: Optional[Iterable[str]] = None):
+    """Emit an event to Socket.IO clients and native WebSocket subscribers."""
+    safe_payload = _prepare_payload(payload)
+    envelope = json.dumps(
+        {
+            "type": event_type,
+            "payload": safe_payload,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    )
+
+    if user_ids:
+        for user_id in user_ids:
+            await sio.emit(event_type, safe_payload, room=user_id)
+            await websocket_manager.send_personal_message(user_id, envelope)
+    else:
+        await sio.emit(event_type, safe_payload)
+        await websocket_manager.broadcast(envelope)
 @sio.event
 async def connect(sid, environ):
     """Handle client connection"""
@@ -99,7 +183,7 @@ async def typing_stop(sid, data):
 async def send_notification(user_id: str, notification_data: dict):
     """Send notification to a specific user"""
     try:
-        await sio.emit("notification", notification_data, room=user_id)
+        await emit_event("new_notification", notification_data, [user_id])
         logger.info(f"Notification sent to user {user_id}")
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
@@ -107,7 +191,7 @@ async def send_notification(user_id: str, notification_data: dict):
 async def send_message(user_id: str, message_data: dict):
     """Send message to a specific user"""
     try:
-        await sio.emit("new_message", message_data, room=user_id)
+        await emit_event("new_message", message_data, [user_id])
         logger.info(f"Message sent to user {user_id}")
     except Exception as e:
         logger.error(f"Error sending message: {e}")
@@ -115,7 +199,7 @@ async def send_message(user_id: str, message_data: dict):
 async def send_application_status_update(user_id: str, status_data: dict):
     """Send application status update to applicant"""
     try:
-        await sio.emit("application_status_update", status_data, room=user_id)
+        await emit_event("application_status_update", status_data, [user_id])
         logger.info(f"Application status update sent to user {user_id}")
     except Exception as e:
         logger.error(f"Error sending application status update: {e}")
@@ -123,7 +207,7 @@ async def send_application_status_update(user_id: str, status_data: dict):
 async def broadcast_post(post_data: dict):
     """Broadcast new post to all connected users"""
     try:
-        await sio.emit("new_post", post_data)
+        await emit_event("new_post", post_data)
     except Exception as e:
         logger.error(f"Error broadcasting post: {e}")
 
