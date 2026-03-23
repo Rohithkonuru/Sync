@@ -205,6 +205,7 @@ async def create_post_with_form_data(
 ):
     """Create a post using multipart/form-data (mobile-safe upload path)."""
     try:
+        incoming_media_url = media_url
         media_url = None
         resolved_media_type = None
         images = []
@@ -213,7 +214,8 @@ async def create_post_with_form_data(
             media_url, resolved_media_type = await _save_uploaded_media(media)
             if resolved_media_type == "image":
                 images = [media_url]
-        elif media_url:
+        elif incoming_media_url:
+            media_url = incoming_media_url
             resolved_media_type = media_type or "image"
             if resolved_media_type == "image":
                 images = [media_url]
@@ -281,6 +283,13 @@ async def get_feed(
     current_user: dict = Depends(get_current_user)
 ):
     """Get global feed sorted by recency for all dashboards."""
+    role = (current_user.get("user_type") or current_user.get("role") or "").lower()
+    if role == "recruiter":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Recruiters cannot access feed",
+        )
+
     db = get_database()
     user_id = str(current_user["_id"])
     connections = set(current_user.get("connections", []))

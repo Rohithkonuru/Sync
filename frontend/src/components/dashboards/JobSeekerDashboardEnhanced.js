@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useFeed } from '../../context/FeedContext';
-import { jobService, postService } from '../../services/api';
-import { getDashboardFeed } from '../../services/feedService';
+import { jobService } from '../../services/api';
 import { TOAST_MESSAGES } from '../../utils/toastMessages';
 import { Button, Card, Badge, ProgressBar, Input } from '../ui';
 import FeedCard from '../common/FeedCard';
@@ -34,7 +33,7 @@ import PostComposer from '../PostComposer';
  */
 const JobSeekerDashboardEnhanced = () => {
   const { user } = useAuth();
-  const { getFeed, setFeed, removePost, upsertPost } = useFeed();
+  const { posts, fetchFeed, addPost, deletePost, upsertPost } = useFeed();
   const navigate = useNavigate();
   
   // State
@@ -72,6 +71,10 @@ const JobSeekerDashboardEnhanced = () => {
     loadData();
     loadAtsScore();
   }, []);
+
+  useEffect(() => {
+    setFeedPosts(Array.isArray(posts) ? posts : []);
+  }, [posts]);
 
   const loadAtsScore = async () => {
     try {
@@ -132,7 +135,7 @@ const JobSeekerDashboardEnhanced = () => {
         jobService.getJobs({ limit: 5 }).catch(() => []),
         jobService.getApplications({ limit: 5 }).catch(() => []),
         jobService.getSavedJobs?.().catch(() => []) || [], // Safe call if method exists
-        getDashboardFeed({ limit: 10, include_demo: true }).catch(() => getFeed('all'))
+        fetchFeed({ limit: 10, sort_by: 'recent' }).catch(() => [])
       ]);
 
       setRecommendedJobs(jobsData);
@@ -140,7 +143,6 @@ const JobSeekerDashboardEnhanced = () => {
       setSavedJobs(savedData);
       const normalizedPosts = Array.isArray(postsData) ? postsData : [];
       setFeedPosts(normalizedPosts);
-      setFeed('all', normalizedPosts);
       
     } catch (error) {
       console.error('Error loading job seeker dashboard:', error);
@@ -154,12 +156,7 @@ const JobSeekerDashboardEnhanced = () => {
 
   const handleCreatePost = async (postData) => {
     try {
-      const newPost = await postService.createPost(postData);
-      setFeedPosts(prev => {
-        const next = [newPost, ...prev];
-        setFeed('all', next);
-        return next;
-      });
+      await addPost(postData);
       toast.success(TOAST_MESSAGES.POST_CREATED);
     } catch (error) {
       console.error('Error creating post:', error);
@@ -478,19 +475,13 @@ n                <h3 className="font-bold text-gray-900">Connections</h3>
                         currentUserId={user?._id || user?.id}
                         onPostUpdate={(postUpdate) => {
                           if (typeof postUpdate === 'string') {
-                            removePost(postUpdate);
-                            setFeedPosts((prev) => prev.filter((p) => (p.id || p._id) !== postUpdate));
+                            deletePost(postUpdate);
                             toast.success('Post deleted');
                             return;
                           }
 
                           if (postUpdate?.id || postUpdate?._id) {
-                            upsertPost('all', postUpdate);
-                            setFeedPosts((prev) => prev.map((p) =>
-                              String(p.id || p._id) === String(postUpdate.id || postUpdate._id)
-                                ? { ...p, ...postUpdate }
-                                : p
-                            ));
+                            upsertPost(postUpdate);
                           }
                         }}
                       />

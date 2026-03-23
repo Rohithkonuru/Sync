@@ -326,22 +326,8 @@ const StudentDashboardEnhanced = () => {
 
       setInternships(Array.isArray(internshipData) ? internshipData : []);
       setApplications(Array.isArray(applicationData) ? applicationData : []);
-      
-      // Add demo images to some posts for better UX
-      const postsWithImages = (Array.isArray(postsData) ? postsData : []).map((post, index) => {
-        if (index % 3 === 0 && !post.images) { // Add images to every 3rd post
-          return {
-            ...post,
-            images: [
-              'https://images.unsplash.com/photo-1555949963-aa79dcee981c?w=400&h=300&fit=crop',
-              'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&h=300&fit=crop'
-            ]
-          };
-        }
-        return post;
-      });
-      
-      setFeedPosts(postsWithImages);
+
+      setFeedPosts(Array.isArray(postsData) ? postsData : []);
       
     } catch (error) {
       console.error('Error loading student dashboard:', error);
