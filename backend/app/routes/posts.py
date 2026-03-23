@@ -152,46 +152,53 @@ async def _save_uploaded_media(file: UploadFile):
 
 
 @router.post("", response_model=PostResponse)
-async def create_post(post_data: PostCreate, current_user: dict = Depends(get_current_user)):
-    """Create a new post"""
+async def _create_post_internal(post_data: PostCreate, current_user: dict):
+    """Internal helper to create a post (shared logic for all create endpoints)"""
+    db = get_database()
+    
+    post_dict = {
+        "user_id": str(current_user["_id"]),
+        "user_name": f"{current_user.get('first_name')} {current_user.get('last_name')}",
+        "user_picture": current_user.get("profile_picture"),
+        "user_avatar": current_user.get("profile_picture"),
+        "user_role": current_user.get("user_type", "professional"),
+        "user_headline": current_user.get("headline", ""),
+        "content": post_data.content,
+        "images": post_data.images,
+        "media_url": post_data.media_url,
+        "media_type": post_data.media_type,
+        "likes": [],
+        "comments": [],
+        "shares": 0,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    
+    result = await db.posts.insert_one(post_dict)
+    
+    # Fetch the created post
+    post = await db.posts.find_one({"_id": result.inserted_id})
+    post_response = post_to_dict(post)
+    
+    # Broadcast the new post (non-blocking)
     try:
-        db = get_database()
-        
-        post_dict = {
-            "user_id": str(current_user["_id"]),
-            "user_name": f"{current_user.get('first_name')} {current_user.get('last_name')}",
-            "user_picture": current_user.get("profile_picture"),
-            "user_avatar": current_user.get("profile_picture"),
-            "user_role": current_user.get("user_type", "professional"),
-            "user_headline": current_user.get("headline", ""),
-            "content": post_data.content,
-            "images": post_data.images,
-            "media_url": post_data.media_url,
-            "media_type": post_data.media_type,
-            "likes": [],
-            "comments": [],
-            "shares": 0,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        
-        result = await db.posts.insert_one(post_dict)
-        
-        # Fetch the created post
-        post = await db.posts.find_one({"_id": result.inserted_id})
-        post_response = post_to_dict(post)
-        
-        # Broadcast the new post
         await broadcast_post(post_response)
-        
-        # Record sync score activity
-        try:
-            sync_score_service = SyncScoreService()
-            await sync_score_service.record_activity(str(current_user["_id"]), "post_created")
-        except Exception as e:
-            print(f"Warning: Failed to record post creation activity: {str(e)}")
-        
-        return post_response
+    except Exception as e:
+        print(f"Warning: Failed to broadcast post: {str(e)}")
+    
+    # Record sync score activity (non-blocking)
+    try:
+        sync_score_service = SyncScoreService()
+        await sync_score_service.record_activity(str(current_user["_id"]), "post_created")
+    except Exception as e:
+        print(f"Warning: Failed to record post creation activity: {str(e)}")
+    
+    return post_response
+
+async def create_post(post_data: PostCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new post via JSON"""
+    try:
+        return await _create_post_internal(post_data, current_user)
     except Exception as e:
         print(f"Error creating post: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to create post: {str(e)}")
@@ -234,7 +241,7 @@ async def create_post_with_form_data(
             media_url=media_url,
             media_type=resolved_media_type,
         )
-        return await create_post(payload, current_user)
+        return await _create_post_internal(payload, current_user)
     except HTTPException:
         raise
     except Exception as e:
